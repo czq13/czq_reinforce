@@ -195,7 +195,7 @@ class DQNAgent(object):
     """
     return collections.namedtuple('DQN_network', ['q_values'])
 
-  def _network_template(self, state):
+  def _network_template_for_atari(self, state):
     """Builds the convolutional network used to compute the agent's Q-values.
 
     Args:
@@ -212,6 +212,14 @@ class DQNAgent(object):
     net = slim.flatten(net)
     net = slim.fully_connected(net, 512)
     q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
+    return self._get_network_type()(q_values)
+  def _network_template(self,state):
+    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
+    net = tf.cast(state,tf.float32)
+    net = tf.div(net,cons)
+    net = slim.fully_connected(net,32)
+    net = slim.fully_connected(net,32)
+    q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values)
 
   def _build_networks(self):
