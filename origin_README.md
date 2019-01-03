@@ -155,6 +155,7 @@ python -um dopamine.atari.train \
   --agent_name=dqn \
   --base_dir=/tmp/dopamine \
   --gin_files='dopamine/agents/dqn/configs/dqn.gin'
+  python -um dopamine.ctrl.train --agent_name=dqn --base_dir=tmp/dopamine --gin_files='dopamine/agents/dqn/configs/dqn.gin'
 ```
 
 By default, this will kick off an experiment lasting 200 million frames.
