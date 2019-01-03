@@ -34,9 +34,9 @@ import gin.tf
 slim = tf.contrib.slim
 
 
-NATURE_DQN_OBSERVATION_SHAPE = (84, 84)  # Size of downscaled Atari 2600 frame.
-NATURE_DQN_DTYPE = tf.uint8  # DType of Atari 2600 observations.
-NATURE_DQN_STACK_SIZE = 4  # Number of frames in the state stack.
+NATURE_DQN_OBSERVATION_SHAPE = (4, 1)  # Size of downscaled Atari 2600 frame.
+NATURE_DQN_DTYPE = tf.float32  # DType of Atari 2600 observations.
+NATURE_DQN_STACK_SIZE = 1  # Number of frames in the state stack.
 
 
 def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
@@ -165,8 +165,10 @@ class DQNAgent(object):
     with tf.device(tf_device):
       # Create a placeholder for the state input to the DQN network.
       # The last axis indicates the number of consecutive frames stacked.
+      # state_shape=(1,4,1)
       state_shape = (1,) + self.observation_shape + (stack_size,)
       self.state = np.zeros(state_shape)
+      # state_ph.shape=(1,4,1)
       self.state_ph = tf.placeholder(self.observation_dtype, state_shape,
                                      name='state_ph')
       self._replay = self._build_replay_buffer(use_staging)
@@ -219,6 +221,7 @@ class DQNAgent(object):
     net = tf.div(net,cons)
     net = slim.fully_connected(net,32)
     net = slim.fully_connected(net,32)
+    net = slim.flatten(net)
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values)
 
@@ -239,12 +242,14 @@ class DQNAgent(object):
     # share the same weights.
     self.online_convnet = tf.make_template('Online', self._network_template)
     self.target_convnet = tf.make_template('Target', self._network_template)
+    print('state_ph={}'.format(self.state_ph.shape.as_list()))
     self._net_outputs = self.online_convnet(self.state_ph)
     # TODO(bellemare): Ties should be broken. They are unlikely to happen when
     # using a deep network, but may affect performance with a linear
     # approximation scheme.
+    print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
     self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
-
+    print(self._q_argmax.shape.as_list())
     self._replay_net_outputs = self.online_convnet(self._replay.states)
     self._replay_next_target_net_outputs = self.target_convnet(
         self._replay.next_states)
