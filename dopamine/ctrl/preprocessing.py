@@ -49,20 +49,20 @@ class GymPreprocessing(object):
   在由于不处理图像问题，所以暂时frame_skip设置为1，screen_size设置为0，目的是拿掉所有sreen_size可能影响的人
   """
 
-  def __init__(self, environment, frame_skip=1, terminal_on_life_loss=False,
+  def __init__(self, frame_skip=1, terminal_on_life_loss=False,
                screen_size=0):
-    self.env = gym.make('CartPole-v0')
-    self.env.reset()
+    self.environment = gym.make('CartPole-v0')
+    self.environment.reset()
 
   @property
   def observation_space(self):
     # Return the observation space adjusted to match the shape of the processed
     # observations.
-    return self.env.observation_space
+    return self.environment.observation_space
 
   @property
   def action_space(self):
-    return self.env.environment.action_space
+    return self.environment.action_space
 
   @property
   def reward_range(self):
@@ -73,17 +73,8 @@ class GymPreprocessing(object):
     return self.environment.metadata
 
   def reset(self):
-    """Resets the environment.
 
-    Returns:
-      observation: numpy array, the initial observation emitted by the
-        environment.
-    """
-    self.environment.reset()
-    self.lives = self.environment.ale.lives()
-    self._fetch_grayscale_observation(self.screen_buffer[0])
-    self.screen_buffer[1].fill(0)
-    return self._pool_and_resize()
+    return self.environment.reset()
 
   def render(self, mode):
     """Renders the current screen, before preprocessing.
@@ -123,63 +114,8 @@ class GymPreprocessing(object):
         episode is over.
       info: Gym API's info data structure.
     """
-    accumulated_reward = 0.
-
-    for time_step in range(self.frame_skip):
-      # We bypass the Gym observation altogether and directly fetch the
-      # grayscale image from the ALE. This is a little faster.
-      _, reward, game_over, info = self.environment.step(action)
-      accumulated_reward += reward
-
-      if self.terminal_on_life_loss:
-        new_lives = self.environment.ale.lives()
-        is_terminal = game_over or new_lives < self.lives
-        self.lives = new_lives
-      else:
-        is_terminal = game_over
-
-      if is_terminal:
-        break
-      # We max-pool over the last two frames, in grayscale.
-      elif time_step >= self.frame_skip - 2:
-        t = time_step - (self.frame_skip - 2)
-        self._fetch_grayscale_observation(self.screen_buffer[t])
-
-    # Pool the last two observations.
-    observation = self._pool_and_resize()
+    observation, reward, game_over, info = self.environment.step(action)
 
     self.game_over = game_over
-    return observation, accumulated_reward, is_terminal, info
+    return observation, reward, game_over, info
 
-  def _fetch_grayscale_observation(self, output):
-    """Returns the current observation in grayscale.
-
-    The returned observation is stored in 'output'.
-
-    Args:
-      output: numpy array, screen buffer to hold the returned observation.
-
-    Returns:
-      observation: numpy array, the current observation in grayscale.
-    """
-    self.environment.ale.getScreenGrayscale(output)
-    return output
-
-  def _pool_and_resize(self):
-    """Transforms two frames into a Nature DQN observation.
-
-    For efficiency, the transformation is done in-place in self.screen_buffer.
-
-    Returns:
-      transformed_screen: numpy array, pooled, resized screen.
-    """
-    # Pool if there are enough screens to do so.
-    if self.frame_skip > 1:
-      np.maximum(self.screen_buffer[0], self.screen_buffer[1],
-                 out=self.screen_buffer[0])
-
-    transformed_image = cv2.resize(self.screen_buffer[0],
-                                   (self.screen_size, self.screen_size),
-                                   interpolation=cv2.INTER_AREA)
-    int_image = np.asarray(transformed_image, dtype=np.uint8)
-    return np.expand_dims(int_image, axis=2)

@@ -24,6 +24,7 @@ import time
 from dopamine.common import checkpointer
 from dopamine.common import iteration_statistics
 from dopamine.common import logger
+from dopamine.ctrl.preprocessing import GymPreprocessing
 import gym
 import numpy as np
 import tensorflow as tf
@@ -70,9 +71,7 @@ def create_atari_environment(game_name, sticky_actions=True):
   Returns:
     An Atari 2600 environment with some standard preprocessing.
   """
-  game_version = 'v0' if sticky_actions else 'v4'
-  full_game_name = 'CartPole-v0'
-  env = gym.make(full_game_name)
+  env = GymPreprocessing()
   
   return env
 

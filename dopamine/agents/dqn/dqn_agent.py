@@ -221,6 +221,7 @@ class DQNAgent(object):
     net = tf.div(net,cons)
     net = slim.fully_connected(net,32)
     net = slim.fully_connected(net,32)
+    #tf.summary.histogram('inter_net', net)
     net = slim.flatten(net)
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values)
