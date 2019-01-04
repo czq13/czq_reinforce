@@ -92,7 +92,7 @@ class DQNAgent(object):
                    epsilon=0.00001,
                    centered=True),
                summary_writer=None,
-               summary_writing_frequency=500):
+               summary_writing_frequency=5):
     """Initializes the agent and constructs the components of its graph.
 
     Args:
@@ -195,7 +195,7 @@ class DQNAgent(object):
     Returns:
       net_type: _network_type object defining the outputs of the network.
     """
-    return collections.namedtuple('DQN_network', ['q_values'])
+    return collections.namedtuple('DQN_network', ['q_values','internal_output'])
 
   def _network_template_for_atari(self, state):
     """Builds the convolutional network used to compute the agent's Q-values.
@@ -220,11 +220,10 @@ class DQNAgent(object):
     net = tf.cast(state,tf.float32)
     net = tf.div(net,cons)
     net = slim.fully_connected(net,32)
-    net = slim.fully_connected(net,32)
-    #tf.summary.histogram('inter_net', net)
-    net = slim.flatten(net)
+    tnet = slim.fully_connected(net,32)
+    net = slim.flatten(tnet)
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
-    return self._get_network_type()(q_values)
+    return self._get_network_type()(q_values,tnet)
 
   def _build_networks(self):
     """Builds the Q-value network computations needed for acting and training.
@@ -243,15 +242,16 @@ class DQNAgent(object):
     # share the same weights.
     self.online_convnet = tf.make_template('Online', self._network_template)
     self.target_convnet = tf.make_template('Target', self._network_template)
-    print('state_ph={}'.format(self.state_ph.shape.as_list()))
+    #print('state_ph={}'.format(self.state_ph.shape.as_list()))
     self._net_outputs = self.online_convnet(self.state_ph)
     # TODO(bellemare): Ties should be broken. They are unlikely to happen when
     # using a deep network, but may affect performance with a linear
     # approximation scheme.
-    print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
+    #print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
     self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
-    print(self._q_argmax.shape.as_list())
+    #print(self._q_argmax.shape.as_list())
     self._replay_net_outputs = self.online_convnet(self._replay.states)
+    tf.summary.histogram('internal_output',self._replay_net_outputs.internal_output)
     self._replay_next_target_net_outputs = self.target_convnet(
         self._replay.next_states)
 
