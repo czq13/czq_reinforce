@@ -28,7 +28,7 @@ from gym.spaces.box import Box
 import gym
 import numpy as np
 import gin.tf
-import cv2
+#import cv2
 
 
 @gin.configurable

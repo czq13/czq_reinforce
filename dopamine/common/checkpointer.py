@@ -63,6 +63,7 @@ def get_latest_checkpoint_number(base_directory):
   Returns:
     int, the iteration number of the latest checkpoint, or -1 if none was found.
   """
+  return -1
   glob = os.path.join(base_directory, 'sentinel_checkpoint_complete.*')
   def extract_iteration(x):
     return int(x[x.rfind('.') + 1:])
