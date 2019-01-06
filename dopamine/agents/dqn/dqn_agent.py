@@ -247,13 +247,17 @@ class DQNAgent(object):
     # TODO(bellemare): Ties should be broken. They are unlikely to happen when
     # using a deep network, but may affect performance with a linear
     # approximation scheme.
-    #print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
+    print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
+    # batch_size * action_nums
     self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
-    #print(self._q_argmax.shape.as_list())
+    print(self._q_argmax.shape.as_list())
     self._replay_net_outputs = self.online_convnet(self._replay.states)
     tf.summary.histogram('internal_output',self._replay_net_outputs.internal_output)
-    self._replay_next_target_net_outputs = self.target_convnet(
-        self._replay.next_states)
+    self._replay_next_target_net_outputs = self.target_convnet(self._replay.next_states)
+    #batch_size * action_nums
+    self._replay_next_online_net_outputs = self.online_convnet(self._replay.next_states)
+    print(self._replay_next_online_net_outputs.q_values.shape.as_list())
+    #self._replay_next_online_net_outputs.as_list()
 
   def _build_replay_buffer(self, use_staging):
     """Creates the replay buffer used by the agent.
@@ -280,8 +284,14 @@ class DQNAgent(object):
       target_q_op: An op calculating the Q-value.
     """
     # Get the maximum Q-value across the actions dimension.
-    replay_next_qt_max = tf.reduce_max(
-        self._replay_next_target_net_outputs.q_values, 1)
+    # batch_size
+    replay_action = tf.argmax(self._replay_next_online_net_outputs.q_values,axis = 1)[:,None]
+    indices = tf.range(32,dtype=tf.int64)[:,None]
+    rank = tf.concat([indices,replay_action],1)
+    print('our replay_action.shape={}'.format(replay_action.shape.as_list()))
+    #replay_next_qt_max = tf.reduce_max(
+    #    self._replay_next_target_net_outputs.q_values, 1)
+    replay_next_qt_max = tf.gather_nd(self._replay_next_target_net_outputs.q_values,rank)
     # Calculate the Bellman target value.
     #   Q_t = R_t + \gamma^N * Q'_t+1
     # where,

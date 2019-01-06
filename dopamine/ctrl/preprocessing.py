@@ -115,7 +115,7 @@ class GymPreprocessing(object):
       info: Gym API's info data structure.
     """
     observation, reward, game_over, info = self.environment.step(action)
-
+    reward /= 20.0
     self.game_over = game_over
     return observation, reward, game_over, info
 
