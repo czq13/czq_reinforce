@@ -16,7 +16,7 @@ RainbowAgent.target_update_period = 2500  # agent steps
 RainbowAgent.epsilon_train = 0.01
 RainbowAgent.epsilon_eval = 0.001
 RainbowAgent.epsilon_decay_period = 250000  # agent steps
-RainbowAgent.replay_scheme = 'prioritized'
+RainbowAgent.replay_scheme = 'uniform'
 RainbowAgent.tf_device = '/gpu:0'  # use '/cpu:*' for non-GPU version
 RainbowAgent.optimizer = @tf.train.AdamOptimizer()
 

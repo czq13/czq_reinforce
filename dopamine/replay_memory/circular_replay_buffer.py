@@ -103,7 +103,7 @@ class OutOfGraphReplayBuffer(object):
                gamma=0.99,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
                extra_storage_types=None,
-               observation_dtype=np.uint8):
+               observation_dtype=np.float32):
     """Initializes OutOfGraphReplayBuffer.
 
     Args:
@@ -657,7 +657,7 @@ class WrappedReplayBuffer(object):
                wrapped_memory=None,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
                extra_storage_types=None,
-               observation_dtype=np.uint8):
+               observation_dtype=np.float32):
     """Initializes WrappedReplayBuffer.
 
     Args:

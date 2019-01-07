@@ -253,7 +253,22 @@ class DQNAgent(object):
     self._replay_net_outputs = self.online_convnet(self._replay.states)
     
     # czq add
-    tf.summary.histogram('internal_output',self._replay_net_outputs.q_values)
+    print(self._replay_net_outputs.internal_output)
+    internal_output = tf.squeeze(self._replay_net_outputs.internal_output)
+    print(internal_output)
+    indices = tf.range(32,dtype=tf.int32)[:,None]
+    rank = tf.concat([indices,tf.constant([0]*32)[:,None]],1)
+    tf.summary.scalar('internal_output0_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
+    tf.summary.scalar('internal_output0_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
+    rank = tf.concat([indices,tf.constant([1]*32)[:,None]],1)
+    tf.summary.scalar('internal_output1_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
+    tf.summary.scalar('internal_output1_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
+    rank = tf.concat([indices,tf.constant([2]*32)[:,None]],1)
+    tf.summary.scalar('internal_output2_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
+    tf.summary.scalar('internal_output2_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
+    rank = tf.concat([indices,tf.constant([3]*32)[:,None]],1)
+    tf.summary.scalar('internal_output3_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
+    tf.summary.scalar('internal_output3_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
     
     self._replay_next_target_net_outputs = self.target_convnet(self._replay.next_states)
     #batch_size * action_nums
