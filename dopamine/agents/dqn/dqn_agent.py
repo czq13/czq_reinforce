@@ -247,16 +247,17 @@ class DQNAgent(object):
     # TODO(bellemare): Ties should be broken. They are unlikely to happen when
     # using a deep network, but may affect performance with a linear
     # approximation scheme.
-    print('self._net_outputs.q_values={}'.format(self._net_outputs.q_values.shape.as_list()))
     # batch_size * action_nums
     self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
-    print(self._q_argmax.shape.as_list())
+ 
     self._replay_net_outputs = self.online_convnet(self._replay.states)
-    tf.summary.histogram('internal_output',self._replay_net_outputs.internal_output)
+    
+    # czq add
+    tf.summary.histogram('internal_output',self._replay_net_outputs.q_values)
+    
     self._replay_next_target_net_outputs = self.target_convnet(self._replay.next_states)
     #batch_size * action_nums
     self._replay_next_online_net_outputs = self.online_convnet(self._replay.next_states)
-    print(self._replay_next_online_net_outputs.q_values.shape.as_list())
     #self._replay_next_online_net_outputs.as_list()
 
   def _build_replay_buffer(self, use_staging):

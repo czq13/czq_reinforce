@@ -72,7 +72,7 @@ class RainbowAgent(dqn_agent.DQNAgent):
                epsilon_train=0.01,
                epsilon_eval=0.001,
                epsilon_decay_period=250000,
-               replay_scheme='uniform',
+               replay_scheme='prioritized',
                tf_device='/cpu:*',
                use_staging=True,
                optimizer=tf.train.AdamOptimizer(
