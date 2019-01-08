@@ -31,7 +31,7 @@ from dopamine.ctrl import run_experiment
 import tensorflow as tf
 
 
-flags.DEFINE_bool('debug_mode', False,
+flags.DEFINE_bool('debug_mode', True,
                   'If set to true, the agent will output in-episode statistics '
                   'to Tensorboard. Disabled by default as this results in '
                   'slower training.')

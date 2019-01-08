@@ -72,7 +72,7 @@ class RainbowAgent(dqn_agent.DQNAgent):
                epsilon_train=0.01,
                epsilon_eval=0.001,
                epsilon_decay_period=250000,
-               replay_scheme='prioritized',
+               replay_scheme='uniform',
                tf_device='/cpu:*',
                use_staging=True,
                optimizer=tf.train.AdamOptimizer(
@@ -152,9 +152,9 @@ class RainbowAgent(dqn_agent.DQNAgent):
       net_type: _network_type object defining the outputs of the network.
     """
     return collections.namedtuple('c51_network',
-                                  ['q_values', 'logits', 'probabilities'])
+                                  ['q_values', 'logits', 'probabilities','internal_output'])
 
-  def _network_template(self, state):
+  def _network_template_origin_version(self, state):
     """Builds a convolutional network that outputs Q-value distributions.
 
     Args:
@@ -172,9 +172,9 @@ class RainbowAgent(dqn_agent.DQNAgent):
         net, 32, [8, 8], stride=4, weights_initializer=weights_initializer)
     net = slim.conv2d(
         net, 64, [4, 4], stride=2, weights_initializer=weights_initializer)
-    net = slim.conv2d(
+    tnet = slim.conv2d(
         net, 64, [3, 3], stride=1, weights_initializer=weights_initializer)
-    net = slim.flatten(net)
+    net = slim.flatten(tnet)
     net = slim.fully_connected(
         net, 512, weights_initializer=weights_initializer)
     net = slim.fully_connected(
@@ -187,6 +187,26 @@ class RainbowAgent(dqn_agent.DQNAgent):
     probabilities = tf.contrib.layers.softmax(logits)
     q_values = tf.reduce_sum(self._support * probabilities, axis=2)
     return self._get_network_type()(q_values, logits, probabilities)
+  
+  def _network_template(self,state):
+    weights_initializer = slim.variance_scaling_initializer(
+        factor=1.0 / np.sqrt(3.0), mode='FAN_IN', uniform=True)
+    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
+    net = tf.cast(state,tf.float32)
+    net = tf.div(net,cons)
+    net = slim.fully_connected(net,128, weights_initializer=weights_initializer)
+    tnet = slim.fully_connected(net,128, weights_initializer=weights_initializer)
+    net = slim.flatten(tnet)
+    net = slim.fully_connected(net,512,weights_initializer=weights_initializer)
+    net = slim.fully_connected(
+        net,
+        self.num_actions*self._num_atoms,
+        activation_fn=None,
+        weights_initializer=weights_initializer)
+    logits = tf.reshape(net,[-1,self.num_actions,self._num_atoms])
+    probabilities = tf.contrib.layers.softmax(logits)
+    q_values = tf.reduce_sum(self._support*probabilities,axis=2)
+    return self._get_network_type()(q_values, logits, probabilities,tnet)
 
   def _build_replay_buffer(self, use_staging):
     """Creates the replay buffer used by the agent.
