@@ -215,7 +215,7 @@ class DQNAgent(object):
     net = slim.fully_connected(net, 512)
     q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
     return self._get_network_type()(q_values)
-  def _network_template(self,state):
+  def _network_template_no_dueling(self,state):
     cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
     net = tf.cast(state,tf.float32)
     net = tf.div(net,cons)
@@ -224,7 +224,25 @@ class DQNAgent(object):
     net = slim.flatten(tnet)
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values,tnet)
-
+  def _network_template(self,state):
+    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
+    net = tf.cast(state,tf.float32)
+    net = tf.div(net,cons)
+    net = slim.fully_connected(net,32)
+    tnet = slim.fully_connected(net,32)
+    net = slim.flatten(tnet)
+    #batch_size * (action_num + 1)
+    net = slim.fully_connected(net,self.num_actions+1,activation_fn=None)
+    print(net)
+    #value = tf.strided_slice(net,[0,0],[2,1],[1,1])
+    value = net[:,:1]
+    print(value.shape.as_list())
+    #advantage = tf.strided_slice(net,[0,1],[2,4],[1,1])
+    advantage = net[:,1:]
+    print(advantage.shape.as_list())
+    q_values = value + advantage - tf.reduce_max(advantage,axis = 1)[:,None]
+    print(q_values.shape.as_list())
+    return self._get_network_type()(q_values,tnet)
   def _build_networks(self):
     """Builds the Q-value network computations needed for acting and training.
 
