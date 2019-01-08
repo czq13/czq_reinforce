@@ -72,7 +72,7 @@ class RainbowAgent(dqn_agent.DQNAgent):
                epsilon_train=0.01,
                epsilon_eval=0.001,
                epsilon_decay_period=250000,
-               replay_scheme='uniform',
+               replay_scheme='prioritized',
                tf_device='/cpu:*',
                use_staging=True,
                optimizer=tf.train.AdamOptimizer(
@@ -206,7 +206,7 @@ class RainbowAgent(dqn_agent.DQNAgent):
     logits = tf.reshape(net,[-1,self.num_actions,self._num_atoms])
     probabilities = tf.contrib.layers.softmax(logits)
     q_values = tf.reduce_sum(self._support*probabilities,axis=2)
-    return self._get_network_type()(q_values, logits, probabilities,tnet)
+    return self._get_network_type()(q_values, logits, probabilities,state)
 
   def _build_replay_buffer(self, use_staging):
     """Creates the replay buffer used by the agent.
@@ -362,7 +362,7 @@ class RainbowAgent(dqn_agent.DQNAgent):
     if priority is None:
       priority = (1. if self._replay_scheme == 'uniform' else
                   self._replay.memory.sum_tree.max_recorded_priority)
-
+    #print(last_observation)
     if not self.eval_mode:
       self._replay.add(last_observation, action, reward, is_terminal, priority)
 
