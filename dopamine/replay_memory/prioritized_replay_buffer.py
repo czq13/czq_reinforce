@@ -49,7 +49,7 @@ class OutOfGraphPrioritizedReplayBuffer(
                gamma=0.99,
                max_sample_attempts=circular_replay_buffer.MAX_SAMPLE_ATTEMPTS,
                extra_storage_types=None,
-               observation_dtype=np.uint8):
+               observation_dtype=np.float32):
     """Initializes OutOfGraphPrioritizedReplayBuffer.
 
     Args:
