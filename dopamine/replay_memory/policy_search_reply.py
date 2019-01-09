@@ -127,10 +127,9 @@ class OutOfGraphReplayBuffer(object):
                           self._observation_dtype),
             ReplayElement('action', (batch_size,), np.int32),
             ReplayElement('reward', (batch_size,), np.float32),
-            ReplayElement('next_state', (batch_size,) + self._state_shape,
-                          self._observation_dtype),
             ReplayElement('terminal', (batch_size,), np.uint8),
-            ReplayElement('indices', (batch_size,), np.int32)
+            ReplayElement('baseline',(batch_size,),np.float32),
+            ReplayElement('Gt', (batch_size,), np.int32)
         ]
         for element in self._extra_storage_types:
             transition_elements.append(
