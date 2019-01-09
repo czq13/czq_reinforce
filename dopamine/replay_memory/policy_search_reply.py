@@ -100,8 +100,9 @@ class OutOfGraphReplayBuffer(object):
                 ele_data += traj[elements.name]
             ele_array = np.array(ele_data[:self._batch_size])
             if elements.name == 'observation':
-                ele_array = np.reshape(ele_array,self._observation_shape)
+                ele_array = np.reshape(ele_array,(self._batch_size+self._observation_shape+self._stack_size))
             all_data.append(ele_array)
+        all_data.append(np.arange(0,self._batch_size,1))
         self._trajectory_store.clear()
         return tuple(all_data)
 
@@ -129,7 +130,8 @@ class OutOfGraphReplayBuffer(object):
             ReplayElement('reward', (batch_size,), np.float32),
             ReplayElement('terminal', (batch_size,), np.uint8),
             ReplayElement('baseline',(batch_size,),np.float32),
-            ReplayElement('Gt', (batch_size,), np.int32)
+            ReplayElement('Gt', (batch_size,), np.int32),
+            ReplayElement('indices',(batch_size,),np.int32)
         ]
         for element in self._extra_storage_types:
             transition_elements.append(
@@ -146,7 +148,6 @@ class WrappedReplayBuffer(object):
                  use_staging=True,
                  gamma=0.99,
                  wrapped_memory=None,
-                 max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
                  extra_storage_types=None,
                  observation_dtype=np.float32):
         if wrapped_memory is not None:
@@ -237,8 +238,9 @@ class WrappedReplayBuffer(object):
         self.states = self.transition['state']
         self.actions = self.transition['action']
         self.rewards = self.transition['reward']
-        self.next_states = self.transition['next_state']
         self.terminals = self.transition['terminal']
+        self.baseline = self.transition['baseline']
+        self.Gt = self.transition['Gt']
         self.indices = self.transition['indices']
 
     def save(self, checkpoint_dir, iteration_number):
