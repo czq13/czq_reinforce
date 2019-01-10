@@ -20,8 +20,11 @@ class OutOfGraphReplayBuffer(object):
     def __init__(self,
                observation_shape,
                stack_size,
+               replay_capacity,
                batch_size,
+               update_horizon=1,
                gamma=0.99,
+               max_sample_attempts=100,
                extra_storage_types=None,
                observation_dtype=np.float32):
         assert isinstance(observation_shape, tuple)
@@ -35,13 +38,17 @@ class OutOfGraphReplayBuffer(object):
         self._observation_shape = observation_shape
         self._gamma = gamma
         self._observation_dtype = observation_dtype
-        self._extra_storage_types=extra_storage_types
+        if extra_storage_types:
+            self._extra_storage_types=extra_storage_types
+        else:
+            self._extra_storage_types = []
         self._working_trajectory = None
         self.build_working_trajectory()
         self._trajectory_store = []
         self._stack_size = stack_size
         self._batch_size = batch_size
         self._state_shape = self._observation_shape + (self._stack_size,)
+        self.add_count = np.array(0)
 
     def get_storage_signature(self):
         """Returns a default list of elements to be stored in this replay memory.
@@ -57,13 +64,13 @@ class OutOfGraphReplayBuffer(object):
             ReplayElement('action', (), np.int32),
             ReplayElement('reward', (), np.float32),
             ReplayElement('terminal', (), np.uint8),
-            ReplayElement('baseline',(),np.float32),
             ReplayElement('Gt',(),np.float32)
         ]
 
         for extra_replay_element in self._extra_storage_types:
             storage_elements.append(extra_replay_element)
         return storage_elements
+
     def build_working_trajectory(self):
         if self._working_trajectory is not None:
             for name,val in enumerate(self._working_trajectory):
@@ -86,6 +93,7 @@ class OutOfGraphReplayBuffer(object):
             self.build_working_trajectory()
     
     def _add(self,*args):
+        self.add_count += 1
         args_list = []
         for elements in self.get_storage_signature():
             args_list.append(elements.name)
@@ -104,6 +112,7 @@ class OutOfGraphReplayBuffer(object):
             all_data.append(ele_array)
         all_data.append(np.arange(0,self._batch_size,1))
         self._trajectory_store.clear()
+        self.add_count = 0
         return tuple(all_data)
 
     def load(self, checkpoint_dir, suffix):
@@ -129,8 +138,7 @@ class OutOfGraphReplayBuffer(object):
             ReplayElement('action', (batch_size,), np.int32),
             ReplayElement('reward', (batch_size,), np.float32),
             ReplayElement('terminal', (batch_size,), np.uint8),
-            ReplayElement('baseline',(batch_size,),np.float32),
-            ReplayElement('Gt', (batch_size,), np.int32),
+            ReplayElement('Gt', (batch_size,), np.float32),
             ReplayElement('indices',(batch_size,),np.int32)
         ]
         for element in self._extra_storage_types:
@@ -143,20 +151,26 @@ class OutOfGraphReplayBuffer(object):
                              'update_horizon', 'gamma'])
 class WrappedReplayBuffer(object):
     def __init__(self,
-                 observation_shape,
-                 stack_size,
-                 use_staging=True,
-                 gamma=0.99,
-                 wrapped_memory=None,
-                 extra_storage_types=None,
-                 observation_dtype=np.float32):
+               observation_shape,
+               stack_size,
+               use_staging=True,
+               replay_capacity=1000000,
+               batch_size=32,
+               update_horizon=1,
+               gamma=0.99,
+               wrapped_memory=None,
+               max_sample_attempts=100,
+               extra_storage_types=None,
+               observation_dtype=np.float32):
         if wrapped_memory is not None:
             self.memory = wrapped_memory
         else:
             self.memory = OutOfGraphReplayBuffer(
-                observation_shape, gamma,stack_size,
+                observation_shape, stack_size, replay_capacity, batch_size,
+                update_horizon, gamma, max_sample_attempts,
                 observation_dtype=observation_dtype,
                 extra_storage_types=extra_storage_types)
+        self.create_sampling_ops(use_staging)
 
     def add(self, observation, action, reward, terminal, *args):
         self.memory.add(observation, action, reward, terminal, *args)
@@ -239,7 +253,6 @@ class WrappedReplayBuffer(object):
         self.actions = self.transition['action']
         self.rewards = self.transition['reward']
         self.terminals = self.transition['terminal']
-        self.baseline = self.transition['baseline']
         self.Gt = self.transition['Gt']
         self.indices = self.transition['indices']
 

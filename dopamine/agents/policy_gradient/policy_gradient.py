@@ -42,9 +42,9 @@ class PGAgent(object):
     def __init__(self,
                  sess,
                  num_actions,
-                 observation_shape=NATURE_DQN_OBSERVATION_SHAPE,
-                 observation_dtype=NATURE_DQN_DTYPE,
-                 stack_size=NATURE_DQN_STACK_SIZE,
+                 observation_shape=NATURE_GP_OBSERVATION_SHAPE,
+                 observation_dtype=NATURE_GP_DTYPE,
+                 stack_size=NATURE_GP_STACK_SIZE,
                  gamma=0.99,
                  update_horizon=1,
                  min_replay_history=20000,
@@ -144,11 +144,8 @@ class PGAgent(object):
             self.state_ph = tf.placeholder(self.observation_dtype, state_shape,
                                            name='state_ph')
             self._replay = self._build_replay_buffer(use_staging)
-
             self._build_networks()
-
-            self._train_op = self._build_train_op()
-            self._sync_qt_ops = self._build_sync_op()
+            self._sync_qt_ops,self._sync_back_ops = self._build_sync_op()
 
         if self.summary_writer is not None:
             # All tf.summaries should have been defined prior to running this.
@@ -169,68 +166,28 @@ class PGAgent(object):
         """
         return collections.namedtuple('PG_network', ['p_value'])
 
-    def _network_template_for_atari(self, state):
-        """Builds the convolutional network used to compute the agent's Q-values.
-
-        Args:
-          state: `tf.Tensor`, contains the agent's current state.
-
-        Returns:
-          net: _network_type object containing the tensors output by the network.
-        """
-        net = tf.cast(state, tf.float32)
-        net = tf.div(net, 255.)
-        net = slim.conv2d(net, 32, [8, 8], stride=4)
-        net = slim.conv2d(net, 64, [4, 4], stride=2)
-        net = slim.conv2d(net, 64, [3, 3], stride=1)
-        net = slim.flatten(net)
-        net = slim.fully_connected(net, 512)
-        q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
-        return self._get_network_type()(q_values)
-
-    def _network_template_no_dueling(self, state):
-        cons = tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0])
-        net = tf.cast(state, tf.float32)
-        net = tf.div(net, cons)
-        net = slim.fully_connected(net, 32)
-        tnet = slim.fully_connected(net, 32)
-        net = slim.flatten(tnet)
-        q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
-        return self._get_network_type()(q_values, tnet)
-
-    def _network_template_for_dueling(self, state):
-        cons = tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0])
-        net = tf.cast(state, tf.float32)
-        net = tf.div(net, cons)
-        net = slim.fully_connected(net, 32)
-        tnet = slim.fully_connected(net, 32)
-        net = slim.flatten(tnet)
-        # batch_size * (action_num + 1)
-        net = slim.fully_connected(net, self.num_actions + 1, activation_fn=None)
-        print(net)
-        # value = tf.strided_slice(net,[0,0],[2,1],[1,1])
-        value = net[:, :1]
-        print(value.shape.as_list())
-        # advantage = tf.strided_slice(net,[0,1],[2,4],[1,1])
-        advantage = net[:, 1:]
-        print(advantage.shape.as_list())
-        q_values = value + advantage - tf.reduce_max(advantage, axis=1)[:, None]
-        print(q_values.shape.as_list())
-        return self._get_network_type()(q_values, tnet)
-
     def _network_template(self,state):
+        cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
+        net = tf.cast(state,tf.float32)
+        bnet = tf.div(net,cons)
+        net = slim.fully_connected(bnet,32)
+        net = slim.fully_connected(net,32)
+        net = slim.flatten(net)
+        net = slim.fully_connected(net, self.num_actions, activation_fn=None)
+        p_output = tf.contrib.layers.softmax(net)
+
+        return self._get_network_type()(p_output)
+
+    def _network_baseline(self,state):
         cons = tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
         net = slim.fully_connected(bnet,32)
         net = slim.fully_connected(net,32)
-        net = slim.fully_connected(net, self.num_actions, activation_fn=None)
-        p_output = tf.contrib.layer.softmax(net)
+        net = slim.flatten(net)
+        net = slim.fully_connected(net, 1, activation_fn=None)
+        return net
 
-        return self._get_network_type()(p_output)
-
-    def _network_baseline(self,state):
-        pass
     def _build_networks(self):
         """Builds the Q-value network computations needed for acting and training.
 
@@ -250,18 +207,29 @@ class PGAgent(object):
         self.target_convnet = tf.make_template('Target', self._network_template)
         # print('state_ph={}'.format(self.state_ph.shape.as_list()))
         self._net_outputs = self.online_convnet(self.state_ph)
+        self.online_p = self._net_outputs.p_value
         # TODO(bellemare): Ties should be broken. They are unlikely to happen when
         # using a deep network, but may affect performance with a linear
         # approximation scheme.
         # batch_size * action_nums
 
         self._replay_net_p_outputs = self.target_convnet(self._replay.states)
-        self._replay_action_p = tf.gather_nd(self._replay_net_p_outputs,
-                                             tf.concat([self._replay.indices,self._replay.actions],axis=1))
-        self.loss = tf.reduce_mean(tf.multiply(tf.log(self._replay_action_p),self._replay.Gt-self._replay.baseline))
+        self._replay_action_p = tf.gather_nd(self._replay_net_p_outputs.p_value,
+                                             tf.concat([self._replay.indices[:,None],self._replay.actions[:,None]],axis=1))
+        self.base_line = self._network_baseline(self._replay.states)
+        self.main_loss_base_line = tf.stop_gradient(self.base_line)
+        self.advantage = tf.math.subtract(self._replay.Gt[:,None],self.main_loss_base_line)
+        self.loss = -tf.reduce_mean(tf.multiply(tf.log(self._replay_action_p[:,None]),self.advantage))
 
+        self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt-self.base_line))
 
-
+        self._train_op = self.optimizer.minimize(self.loss)
+        self._base_train_op = tf.train.RMSPropOptimizer(
+                     learning_rate=0.00025,
+                     decay=0.95,
+                     momentum=0.0,
+                     epsilon=0.00001,
+                     centered=True).minimize(self.base_loss)
 
     def _build_replay_buffer(self, use_staging):
         """Creates the replay buffer used by the agent.
@@ -280,52 +248,6 @@ class PGAgent(object):
             gamma=self.gamma,
             observation_dtype=self.observation_dtype.as_numpy_dtype)
 
-    def _build_target_q_op(self):
-        """Build an op used as a target for the Q-value.
-
-        Returns:
-          target_q_op: An op calculating the Q-value.
-        """
-        # Get the maximum Q-value across the actions dimension.
-        # batch_size
-        replay_action = tf.argmax(self._replay_next_online_net_outputs.q_values, axis=1)[:, None]
-        indices = tf.range(32, dtype=tf.int64)[:, None]
-        rank = tf.concat([indices, replay_action], 1)
-        print('our replay_action.shape={}'.format(replay_action.shape.as_list()))
-        # replay_next_qt_max = tf.reduce_max(
-        #    self._replay_next_target_net_outputs.q_values, 1)
-        replay_next_qt_max = tf.gather_nd(self._replay_next_target_net_outputs.q_values, rank)
-        # Calculate the Bellman target value.
-        #   Q_t = R_t + \gamma^N * Q'_t+1
-        # where,
-        #   Q'_t+1 = \argmax_a Q(S_t+1, a)
-        #          (or) 0 if S_t is a terminal state,
-        # and
-        #   N is the update horizon (by default, N=1).
-        return self._replay.rewards + self.cumulative_gamma * replay_next_qt_max * (
-                1. - tf.cast(self._replay.terminals, tf.float32))
-
-    def _build_train_op(self):
-        """Builds a training op.
-
-        Returns:
-          train_op: An op performing one step of training from replay data.
-        """
-        replay_action_one_hot = tf.one_hot(
-            self._replay.actions, self.num_actions, 1., 0., name='action_one_hot')
-        replay_chosen_q = tf.reduce_sum(
-            self._replay_net_outputs.q_values * replay_action_one_hot,
-            reduction_indices=1,
-            name='replay_chosen_q')
-
-        target = tf.stop_gradient(self._build_target_q_op())
-        loss = tf.losses.huber_loss(
-            target, replay_chosen_q, reduction=tf.losses.Reduction.NONE)
-        if self.summary_writer is not None:
-            with tf.variable_scope('Losses'):
-                tf.summary.scalar('HuberLoss', tf.reduce_mean(loss))
-        return self.optimizer.minimize(tf.reduce_mean(loss))
-
     def _build_sync_op(self):
         """Builds ops for assigning weights from online to target network.
 
@@ -334,14 +256,19 @@ class PGAgent(object):
         """
         # Get trainable variables from online and target DQNs
         sync_qt_ops = []
+        sync_back_ops = []
         trainables_online = tf.get_collection(
             tf.GraphKeys.TRAINABLE_VARIABLES, scope='Online')
         trainables_target = tf.get_collection(
             tf.GraphKeys.TRAINABLE_VARIABLES, scope='Target')
         for (w_online, w_target) in zip(trainables_online, trainables_target):
             # Assign weights from online to target network.
-            sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
-        return sync_qt_ops
+            #sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
+            #sync_qt_ops.append(w_online.assign(w_target, use_locking=True))
+
+            sync_qt_ops.append(w_online.assign(tf.multiply(w_online,0.99)+tf.multiply(w_target,0.01)))
+            sync_back_ops.append(w_target.assign(w_online))
+        return sync_qt_ops,sync_back_ops
 
     def begin_episode(self, observation):
         """Returns the agent's first action for this episode.
@@ -405,17 +332,8 @@ class PGAgent(object):
         Returns:
            int, the selected action.
         """
-        epsilon = self.epsilon_eval if self.eval_mode else self.epsilon_fn(
-            self.epsilon_decay_period,
-            self.training_steps,
-            self.min_replay_history,
-            self.epsilon_train)
-        if random.random() <= epsilon:
-            # Choose a random action with probability epsilon.
-            return random.randint(0, self.num_actions - 1)
-        else:
-            # Choose the action with highest Q-value at the current state.
-            return self._sess.run(self._q_argmax, {self.state_ph: self.state})
+        p_action = self._sess.run(self.online_p,{self.state_ph: self.state})
+        return np.random.choice(np.arange(len(self.num_actions)), p=p_action)
 
     def _train_step(self):
         """Runs a single training step.
@@ -431,16 +349,14 @@ class PGAgent(object):
         # have been run. This matches the Nature DQN behaviour.
         if self._replay.memory.add_count > self.min_replay_history:
             if self.training_steps % self.update_period == 0:
-                self._sess.run(self._train_op)
+                self._sess.run([self._train_op,self._base_train_op])
+                self._sess.run(self._sync_qt_ops)
+                self._sess.run(self._sync_back_ops)
                 if (self.summary_writer is not None and
                         self.training_steps > 0 and
                         self.training_steps % self.summary_writing_frequency == 0):
                     summary = self._sess.run(self._merged_summaries)
                     self.summary_writer.add_summary(summary, self.training_steps)
-
-            if self.training_steps % self.target_update_period == 0:
-                self._sess.run(self._sync_qt_ops)
-
         self.training_steps += 1
 
     def _record_observation(self, observation):

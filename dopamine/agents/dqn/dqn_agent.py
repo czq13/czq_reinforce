@@ -225,7 +225,7 @@ class DQNAgent(object):
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values,tnet)
   def _network_template(self,state):
-    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
+    cons = tf.reshape(tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0]),[1,4,1,1])
     net = tf.cast(state,tf.float32)
     net = tf.div(net,cons)
     net = slim.fully_connected(net,32)
@@ -271,6 +271,7 @@ class DQNAgent(object):
     self._replay_net_outputs = self.online_convnet(self._replay.states)
     
     # czq add
+    '''
     print(self._replay_net_outputs.internal_output)
     internal_output = tf.squeeze(self._replay_net_outputs.internal_output)
     print(internal_output)
@@ -287,7 +288,7 @@ class DQNAgent(object):
     rank = tf.concat([indices,tf.constant([3]*32)[:,None]],1)
     tf.summary.scalar('internal_output3_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
     tf.summary.scalar('internal_output3_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
-    
+    '''
     self._replay_next_target_net_outputs = self.target_convnet(self._replay.next_states)
     #batch_size * action_nums
     self._replay_next_online_net_outputs = self.online_convnet(self._replay.next_states)
