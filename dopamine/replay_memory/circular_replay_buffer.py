@@ -162,6 +162,7 @@ class OutOfGraphReplayBuffer(object):
         [math.pow(self._gamma, n) for n in range(update_horizon)],
         dtype=np.float32)
 
+
   def _create_storage(self):
     """Creates the numpy arrays used to store transitions.
     """
@@ -170,6 +171,7 @@ class OutOfGraphReplayBuffer(object):
       array_shape = [self._replay_capacity] + list(storage_element.shape)
       self._store[storage_element.name] = np.empty(
           array_shape, dtype=storage_element.type)
+    self.temporary_store = []
 
   def get_add_args_signature(self):
     """The signature of the add function.
@@ -195,7 +197,8 @@ class OutOfGraphReplayBuffer(object):
                       self._observation_dtype),
         ReplayElement('action', (), np.int32),
         ReplayElement('reward', (), np.float32),
-        ReplayElement('terminal', (), np.uint8)
+        ReplayElement('terminal', (), np.uint8),
+        ReplayElement('Gt', (), np.float32)
     ]
 
     for extra_replay_element in self._extra_storage_types:
@@ -231,13 +234,14 @@ class OutOfGraphReplayBuffer(object):
       *args: extra contents with shapes and dtypes according to
         extra_storage_types.
     """
-    self._check_add_types(observation, action, reward, terminal, *args)
-    if self.is_empty() or self._store['terminal'][self.cursor() - 1] == 1:
-      for _ in range(self._stack_size - 1):
-        # Child classes can rely on the padding transitions being filled with
-        # zeros. This is useful when there is a priority argument.
-        self._add_zero_transition()
-    self._add(observation, action, reward, terminal, *args)
+    self.temporary_store.append([observation,action,reward,terminal,0])
+    if terminal:
+      self.temporary_store[-1][4] = self.temporary_store[-1][2]
+      for i in range(len(self.temporary_store)-1,0,-1):
+        self.temporary_store[i-1][4] = self.temporary_store[i-1][2] + self._gamma*self.temporary_store[i][4]
+      for i in self.temporary_store:
+        self._add(i[0],i[1],i[2],i[3],i[4])
+      self.temporary_store.clear()
 
   def _add(self, *args):
     """Internal add method to add to the storage arrays.
@@ -462,12 +466,11 @@ class OutOfGraphReplayBuffer(object):
     """
     if batch_size is None:
       batch_size = self._batch_size
-    if indices is None:
-      indices = self.sample_index_batch(batch_size)
-    assert len(indices) == batch_size
 
+    indices = np.arange(0, batch_size, 1)
     transition_elements = self.get_transition_elements(batch_size)
     batch_arrays = self._create_batch_arrays(batch_size)
+
     for batch_element, state_index in enumerate(indices):
       trajectory_indices = [(state_index + j) % self._replay_capacity
                             for j in range(self._update_horizon)]
@@ -504,8 +507,10 @@ class OutOfGraphReplayBuffer(object):
         elif element.name in self._store.keys():
           element_array[batch_element] = (
               self._store[element.name][state_index])
+        elif element.name == 'Gt':
+          element_array[batch_element] = self._store[element.name][state_index]
         # We assume the other elements are filled in by the subclass.
-
+    self.add_count = 0
     return batch_arrays
 
   def get_transition_elements(self, batch_size=None):
@@ -527,7 +532,8 @@ class OutOfGraphReplayBuffer(object):
         ReplayElement('next_state', (batch_size,) + self._state_shape,
                       self._observation_dtype),
         ReplayElement('terminal', (batch_size,), np.uint8),
-        ReplayElement('indices', (batch_size,), np.int32)
+        ReplayElement('indices', (batch_size,), np.int32),
+        ReplayElement('Gt', (batch_size,), np.float32)
     ]
     for element in self._extra_storage_types:
       transition_elements.append(
@@ -812,6 +818,7 @@ class WrappedReplayBuffer(object):
     self.next_states = self.transition['next_state']
     self.terminals = self.transition['terminal']
     self.indices = self.transition['indices']
+    self.Gt = self.transition['Gt']
 
   def save(self, checkpoint_dir, iteration_number):
     """Save the underlying replay buffer's contents in a file.

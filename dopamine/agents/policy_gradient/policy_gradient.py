@@ -23,7 +23,7 @@ import math
 import os
 import random
 
-from dopamine.replay_memory import policy_search_reply
+from dopamine.replay_memory import circular_replay_buffer
 import numpy as np
 import tensorflow as tf
 
@@ -179,7 +179,7 @@ class PGAgent(object):
         return self._get_network_type()(p_output)
 
     def _network_baseline(self,state):
-        cons = tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0])
+        cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
         net = slim.fully_connected(bnet,32)
@@ -213,15 +213,20 @@ class PGAgent(object):
         # approximation scheme.
         # batch_size * action_nums
 
-        self._replay_net_p_outputs = self.target_convnet(self._replay.states)
-        self._replay_action_p = tf.gather_nd(self._replay_net_p_outputs.p_value,
+        #self._replay_net_p_outputs = self.target_convnet(self._replay.states)
+        self._replay_net_p_outputs = self.online_convnet(self._replay.states)
+        self._replay_p_value = self._replay_net_p_outputs.p_value
+        self.entropy = tf.reduce_sum(self._replay_p_value*tf.log(self._replay_p_value),axis = 1)
+        self.entropy = tf.reduce_mean(self.entropy)
+        self._replay_action_p = tf.gather_nd(self._replay_p_value,
                                              tf.concat([self._replay.indices[:,None],self._replay.actions[:,None]],axis=1))
         self.base_line = self._network_baseline(self._replay.states)
         self.main_loss_base_line = tf.stop_gradient(self.base_line)
-        self.advantage = tf.math.subtract(self._replay.Gt[:,None],self.main_loss_base_line)
-        self.loss = -tf.reduce_mean(tf.multiply(tf.log(self._replay_action_p[:,None]),self.advantage))
+        #self.advantage = tf.subtract(self._replay.Gt[:,None],self.main_loss_base_line)
+        self.advantage = self._replay.Gt[:,None]
+        self.loss = -tf.reduce_sum(tf.multiply(tf.log(self._replay_action_p[:,None]),self.advantage))
 
-        self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt-self.base_line))
+        self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
 
         self._train_op = self.optimizer.minimize(self.loss)
         self._base_train_op = tf.train.RMSPropOptimizer(
@@ -230,6 +235,11 @@ class PGAgent(object):
                      momentum=0.0,
                      epsilon=0.00001,
                      centered=True).minimize(self.base_loss)
+        if self.summary_writer is not None:
+            with tf.variable_scope('Losses'):
+                tf.summary.scalar('baseLoss', self.base_loss)
+                tf.summary.scalar('loss', self.loss)
+                tf.summary.scalar('action entroy',self.entropy)
 
     def _build_replay_buffer(self, use_staging):
         """Creates the replay buffer used by the agent.
@@ -241,7 +251,7 @@ class PGAgent(object):
         Returns:
           A WrapperReplayBuffer object.
         """
-        return policy_search_reply.WrappedReplayBuffer(
+        return circular_replay_buffer.WrappedReplayBuffer(
             observation_shape=self.observation_shape,
             stack_size=self.stack_size,
             use_staging=use_staging,
@@ -333,7 +343,7 @@ class PGAgent(object):
            int, the selected action.
         """
         p_action = self._sess.run(self.online_p,{self.state_ph: self.state})
-        return np.random.choice(np.arange(len(self.num_actions)), p=p_action)
+        return np.random.choice(np.arange(self.num_actions), p=p_action[0])
 
     def _train_step(self):
         """Runs a single training step.
@@ -349,15 +359,14 @@ class PGAgent(object):
         # have been run. This matches the Nature DQN behaviour.
         if self._replay.memory.add_count > self.min_replay_history:
             if self.training_steps % self.update_period == 0:
-                self._sess.run([self._train_op,self._base_train_op])
-                self._sess.run(self._sync_qt_ops)
-                self._sess.run(self._sync_back_ops)
+                _,_,summary = self._sess.run([self._train_op,self._base_train_op,self._merged_summaries])
+                #self._sess.run(self._sync_qt_ops)
+                #self._sess.run(self._sync_back_ops)
                 if (self.summary_writer is not None and
                         self.training_steps > 0 and
                         self.training_steps % self.summary_writing_frequency == 0):
-                    summary = self._sess.run(self._merged_summaries)
                     self.summary_writer.add_summary(summary, self.training_steps)
-        self.training_steps += 1
+            self.training_steps += 1
 
     def _record_observation(self, observation):
         """Records an observation and update state.
