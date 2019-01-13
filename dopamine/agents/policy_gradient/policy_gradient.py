@@ -178,7 +178,10 @@ class PGAgent(object):
 
         return self._get_network_type()(p_output)
 
-    def _network_baseline(self,state):
+    def _get_baseline_type(self):
+        return collections.namedtuple('baseline',['value'])
+
+    def _network_baseline_value_function(self,state):
         cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
@@ -186,7 +189,17 @@ class PGAgent(object):
         net = slim.fully_connected(net,32)
         net = slim.flatten(net)
         net = slim.fully_connected(net, 1, activation_fn=None)
-        return net
+        return self._get_baseline_type()(net)
+
+    def _network_baseline(self,state):
+        cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
+        net = tf.cast(state,tf.float32)
+        bnet = tf.div(net,cons)
+        net = slim.fully_connected(bnet,32)
+        net = slim.fully_connected(net,32)
+        net = slim.flatten(net)
+        net = slim.fully_connected(net, self.num_actions, activation_fn=None)
+        return self._get_baseline_type()(net)
 
     def _build_networks(self):
         """Builds the Q-value network computations needed for acting and training.
@@ -205,6 +218,7 @@ class PGAgent(object):
         # share the same weights.
         self.online_convnet = tf.make_template('Online', self._network_template)
         self.target_convnet = tf.make_template('Target', self._network_template)
+        self.baseline_convnet = tf.make_template('Baseline', self._network_baseline)
         # print('state_ph={}'.format(self.state_ph.shape.as_list()))
         self._net_outputs = self.online_convnet(self.state_ph)
         self.online_p = self._net_outputs.p_value
@@ -220,13 +234,17 @@ class PGAgent(object):
         self.entropy = tf.reduce_mean(self.entropy)
         self._replay_action_p = tf.gather_nd(self._replay_p_value,
                                              tf.concat([self._replay.indices[:,None],self._replay.actions[:,None]],axis=1))
-        self.base_line = self._network_baseline(self._replay.states)
+        self.base_line = self.baseline_convnet(self._replay.states).value
         self.main_loss_base_line = tf.stop_gradient(self.base_line)
         #self.advantage = tf.subtract(self._replay.Gt[:,None],self.main_loss_base_line)
-        self.advantage = self._replay.Gt[:,None]
-        self.loss = -tf.reduce_sum(tf.multiply(tf.log(self._replay_action_p[:,None]),self.advantage))
+        #self.advantage = self._replay.Gt[:,None]
+        self.next_state_value = self.baseline_convnet(self._replay.next_states).value * \
+                                (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
+        self.advantage = self.gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
+        self.loss = -tf.reduce_sum(tf.multiply(tf.log(self._replay_action_p[:,None]),tf.stop_gradient(self.advantage)))
 
-        self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
+        #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
+        self.base_loss = tf.reduce_mean(tf.square(self.advantage))
 
         self._train_op = self.optimizer.minimize(self.loss)
         self._base_train_op = tf.train.RMSPropOptimizer(
@@ -276,7 +294,7 @@ class PGAgent(object):
             #sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
             #sync_qt_ops.append(w_online.assign(w_target, use_locking=True))
 
-            sync_qt_ops.append(w_online.assign(tf.multiply(w_online,0.99)+tf.multiply(w_target,0.01)))
+            sync_qt_ops.append(w_online.assign(tf.multiply(w_online,0.9)+tf.multiply(w_target,0.10)))
             sync_back_ops.append(w_target.assign(w_online))
         return sync_qt_ops,sync_back_ops
 
@@ -312,6 +330,7 @@ class PGAgent(object):
           int, the selected action.
         """
         self._last_observation = self._observation
+        #update _observation
         self._record_observation(observation)
 
         if not self.eval_mode:
