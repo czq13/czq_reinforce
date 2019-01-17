@@ -309,7 +309,7 @@ class OutOfGraphReplayBuffer(object):
     assert start_index < self._replay_capacity
     if not self.is_full():
       assert end_index <= self.cursor(), (
-          'Index {} has not been added.'.format(start_index))
+          'Index {} has not been added.'.format(self.cursor()))
 
     # Fast slice read when there is no wraparound.
     if start_index % self._replay_capacity < end_index % self._replay_capacity:

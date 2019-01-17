@@ -7,8 +7,8 @@ import dopamine.replay_memory.circular_replay_buffer
 import gin.tf.external_configurables
 
 PGAgent.gamma = 0.99
-PGAgent.update_horizon = 3
-PGAgent.min_replay_history = 1600  # agent steps
+PGAgent.update_horizon = 50
+PGAgent.min_replay_history = 1700  # agent steps
 PGAgent.update_period = 4
 PGAgent.target_update_period = 1600  # agent steps
 PGAgent.epsilon_train = 0.01
@@ -26,7 +26,7 @@ tf.train.RMSPropOptimizer.centered = True
 Runner.game_name = 'Pong'
 # Sticky actions with probability 0.25, as suggested by (Machado et al., 2017).
 Runner.sticky_actions = True
-Runner.num_iterations = 500
+Runner.num_iterations = 5000
 Runner.training_steps = 1600  # agent steps
 Runner.evaluation_steps = 1250  # agent steps
 Runner.max_steps_per_episode = 27000  # agent steps

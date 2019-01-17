@@ -249,7 +249,7 @@ class PGAgent(object):
         #self.policy_loss = -tf.reduce_mean(sur1)
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
         self.base_loss = tf.reduce_mean(tf.square(self.advantage))
-        self.loss = self.policy_loss + 0.5*self.base_loss - 0.001 * self.entropy
+        self.loss = self.policy_loss + 0.5*self.base_loss - 0.01 * self.entropy
         self._train_op = self.optimizer.minimize(self.loss)
 
         if self.summary_writer is not None:
@@ -273,7 +273,7 @@ class PGAgent(object):
             stack_size=self.stack_size,
             use_staging=use_staging,
             gamma=self.gamma,
-            observation_dtype=self.observation_dtype.as_numpy_dtype)
+            observation_dtype=self.observation_dtype.as_numpy_dtype,update_horizon=self.update_horizon)
 
     def _build_sync_op(self):
         """Builds ops for assigning weights from online to target network.
