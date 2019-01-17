@@ -174,14 +174,13 @@ class PGAgent(object):
         net = slim.fully_connected(net,32)
         net = slim.flatten(net)
         net = slim.fully_connected(net, self.num_actions, activation_fn=None)
-        p_output = tf.contrib.layers.softmax(net)
-
+        p_output = net
         return self._get_network_type()(p_output)
 
     def _get_baseline_type(self):
         return collections.namedtuple('baseline',['value'])
 
-    def _network_baseline_value_function(self,state):
+    def _network_baseline(self,state):
         cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
@@ -191,7 +190,7 @@ class PGAgent(object):
         net = slim.fully_connected(net, 1, activation_fn=None)
         return self._get_baseline_type()(net)
 
-    def _network_baseline(self,state):
+    def _network_baseline_q_function(self,state):
         cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
@@ -217,7 +216,6 @@ class PGAgent(object):
         # self._get_network_template using whatever input is passed, but will always
         # share the same weights.
         self.online_convnet = tf.make_template('Online', self._network_template)
-        self.target_convnet = tf.make_template('Target', self._network_template)
         self.baseline_convnet = tf.make_template('Baseline', self._network_baseline)
         # print('state_ph={}'.format(self.state_ph.shape.as_list()))
         self._net_outputs = self.online_convnet(self.state_ph)
@@ -362,6 +360,7 @@ class PGAgent(object):
            int, the selected action.
         """
         p_action = self._sess.run(self.online_p,{self.state_ph: self.state})
+        p_action = np.exp(p_action[0]) / np.exp(p_action[0])
         return np.random.choice(np.arange(self.num_actions), p=p_action[0])
 
     def _train_step(self):

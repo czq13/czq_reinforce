@@ -198,7 +198,7 @@ class OutOfGraphReplayBuffer(object):
         ReplayElement('action', (), np.int32),
         ReplayElement('reward', (), np.float32),
         ReplayElement('terminal', (), np.uint8),
-        ReplayElement('Gt', (), np.float32)
+        ReplayElement('old_pro', (), np.float32)
     ]
 
     for extra_replay_element in self._extra_storage_types:
@@ -234,14 +234,7 @@ class OutOfGraphReplayBuffer(object):
       *args: extra contents with shapes and dtypes according to
         extra_storage_types.
     """
-    self.temporary_store.append([observation,action,reward,terminal,0])
-    if terminal:
-      self.temporary_store[-1][4] = self.temporary_store[-1][2]
-      for i in range(len(self.temporary_store)-1,0,-1):
-        self.temporary_store[i-1][4] = self.temporary_store[i-1][2] + self._gamma*self.temporary_store[i][4]
-      for i in self.temporary_store:
-        self._add(i[0],i[1],i[2],i[3],i[4])
-      self.temporary_store.clear()
+    self._add(observation, action, reward, terminal, *args)
 
   def _add(self, *args):
     """Internal add method to add to the storage arrays.
@@ -507,8 +500,6 @@ class OutOfGraphReplayBuffer(object):
         elif element.name in self._store.keys():
           element_array[batch_element] = (
               self._store[element.name][state_index])
-        elif element.name == 'Gt':
-          element_array[batch_element] = self._store[element.name][state_index]
         # We assume the other elements are filled in by the subclass.
     self.add_count = 0
     return batch_arrays
@@ -533,7 +524,7 @@ class OutOfGraphReplayBuffer(object):
                       self._observation_dtype),
         ReplayElement('terminal', (batch_size,), np.uint8),
         ReplayElement('indices', (batch_size,), np.int32),
-        ReplayElement('Gt', (batch_size,), np.float32)
+        ReplayElement('old_pro', (batch_size,), np.float32)
     ]
     for element in self._extra_storage_types:
       transition_elements.append(
@@ -818,7 +809,7 @@ class WrappedReplayBuffer(object):
     self.next_states = self.transition['next_state']
     self.terminals = self.transition['terminal']
     self.indices = self.transition['indices']
-    self.Gt = self.transition['Gt']
+    self.old_pro = self.transition['old_pro']
 
   def save(self, checkpoint_dir, iteration_number):
     """Save the underlying replay buffer's contents in a file.
