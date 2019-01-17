@@ -233,7 +233,7 @@ class PGAgent(object):
         self._replay_action_p = tf.gather_nd(self._replay_p_value,
                                              tf.concat([self._replay.indices[:,None],self._replay.actions[:,None]],axis=1))
         rt1 = tf.div(self._replay_action_p, self._replay.old_pro)
-        rt2 = tf.clip_by_value(rt1, 1-0.2, 1+0.2)
+        rt2 = tf.clip_by_value(rt1, 1.0-0.2, 1.0+0.2)
 
         self.base_line = self.baseline_convnet(self._replay.states).value
         self.main_loss_base_line = tf.stop_gradient(self.base_line)
@@ -243,13 +243,13 @@ class PGAgent(object):
                                 (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
         self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
         self.stop_advantage = tf.stop_gradient(self.advantage)
-        sur1 = tf.multiply(rt1,self.stop_advantage)
-        sur2 = tf.multiply(rt2,self.stop_advantage)
-        self.policy_loss = -tf.reduce_mean(tf.minimum(sur1,sur2))
-
+        sur1 = tf.multiply(rt1[:,None], self.stop_advantage)
+        sur2 = tf.multiply(rt2[:,None], self.stop_advantage)
+        self.policy_loss = -tf.reduce_mean(tf.minimum(sur1, sur2))
+        #self.policy_loss = -tf.reduce_mean(sur1)
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
         self.base_loss = tf.reduce_mean(tf.square(self.advantage))
-        self.loss = self.policy_loss + 0.5*self.base_loss - 0.01 * self.entropy
+        self.loss = self.policy_loss + 0.5*self.base_loss - 0.001 * self.entropy
         self._train_op = self.optimizer.minimize(self.loss)
 
         if self.summary_writer is not None:
