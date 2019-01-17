@@ -215,7 +215,7 @@ class DQNAgent(object):
     net = slim.fully_connected(net, 512)
     q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
     return self._get_network_type()(q_values)
-  def _network_template(self,state):
+  def _network_template_no_dueling(self,state):
     cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
     net = tf.cast(state,tf.float32)
     net = tf.div(net,cons)
@@ -224,7 +224,25 @@ class DQNAgent(object):
     net = slim.flatten(tnet)
     q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
     return self._get_network_type()(q_values,tnet)
-
+  def _network_template(self,state):
+    cons = tf.reshape(tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0]),[1,4,1,1])
+    net = tf.cast(state,tf.float32)
+    net = tf.div(net,cons)
+    net = slim.fully_connected(net,32)
+    tnet = slim.fully_connected(net,32)
+    net = slim.flatten(tnet)
+    #batch_size * (action_num + 1)
+    net = slim.fully_connected(net,self.num_actions+1,activation_fn=None)
+    print(net)
+    #value = tf.strided_slice(net,[0,0],[2,1],[1,1])
+    value = net[:,:1]
+    print(value.shape.as_list())
+    #advantage = tf.strided_slice(net,[0,1],[2,4],[1,1])
+    advantage = net[:,1:]
+    print(advantage.shape.as_list())
+    q_values = value + advantage - tf.reduce_max(advantage,axis = 1)[:,None]
+    print(q_values.shape.as_list())
+    return self._get_network_type()(q_values,tnet)
   def _build_networks(self):
     """Builds the Q-value network computations needed for acting and training.
 
@@ -253,6 +271,7 @@ class DQNAgent(object):
     self._replay_net_outputs = self.online_convnet(self._replay.states)
     
     # czq add
+    '''
     print(self._replay_net_outputs.internal_output)
     internal_output = tf.squeeze(self._replay_net_outputs.internal_output)
     print(internal_output)
@@ -269,7 +288,7 @@ class DQNAgent(object):
     rank = tf.concat([indices,tf.constant([3]*32)[:,None]],1)
     tf.summary.scalar('internal_output3_low',tf.reduce_min(tf.gather_nd(internal_output,rank)))
     tf.summary.scalar('internal_output3_high',tf.reduce_max(tf.gather_nd(internal_output,rank)))
-    
+    '''
     self._replay_next_target_net_outputs = self.target_convnet(self._replay.next_states)
     #batch_size * action_nums
     self._replay_next_online_net_outputs = self.online_convnet(self._replay.next_states)

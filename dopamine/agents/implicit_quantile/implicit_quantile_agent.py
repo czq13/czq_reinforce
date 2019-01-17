@@ -101,7 +101,7 @@ class ImplicitQuantileAgent(rainbow_agent.RainbowAgent):
     return collections.namedtuple(
         'iqn_network', ['quantile_values', 'quantiles'])
 
-  def _network_template(self, state, num_quantiles):
+  def _network_template_for_atari(self, state, num_quantiles):
     r"""Builds an Implicit Quantile ConvNet.
 
     Takes state and quantile as inputs and outputs state-action quantile values.
@@ -157,7 +157,43 @@ class ImplicitQuantileAgent(rainbow_agent.RainbowAgent):
 
     return self._get_network_type()(quantile_values=quantile_values,
                                     quantiles=quantiles)
+  def _network_template(self, state, num_quantiles):
+    weights_initializer = slim.variance_scaling_initializer(
+        factor=1.0 / np.sqrt(3.0), mode='FAN_IN', uniform=True)
+    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
+    net = tf.cast(state,tf.float32)
+    net = tf.div(net,cons)
+    net = slim.fully_connected(net,128, weights_initializer=weights_initializer)
+    tnet = slim.fully_connected(net,128, weights_initializer=weights_initializer)
+    state_net = slim.flatten(tnet)
+    state_net_size = state_net.get_shape().as_list()[-1]
+    state_net_tiled = tf.tile(state_net, [num_quantiles, 1])
 
+    batch_size = state_net.get_shape().as_list()[0]
+    quantiles_shape = [num_quantiles * batch_size, 1]
+    quantiles = tf.random_uniform(
+        quantiles_shape, minval=0, maxval=1, dtype=tf.float32)
+
+    quantile_net = tf.tile(quantiles, [1, self.quantile_embedding_dim])
+    pi = tf.constant(math.pi)
+    quantile_net = tf.cast(tf.range(
+        1, self.quantile_embedding_dim + 1, 1), tf.float32) * pi * quantile_net
+    quantile_net = tf.cos(quantile_net)
+    quantile_net = slim.fully_connected(quantile_net, state_net_size,
+                                        weights_initializer=weights_initializer)
+    # Hadamard product.
+    net = tf.multiply(state_net_tiled, quantile_net)
+
+    net = slim.fully_connected(
+        net, 512, weights_initializer=weights_initializer)
+    quantile_values = slim.fully_connected(
+        net,
+        self.num_actions,
+        activation_fn=None,
+        weights_initializer=weights_initializer)
+
+    return self._get_network_type()(quantile_values=quantile_values,
+                                    quantiles=quantiles)  
   def _build_networks(self):
     """Builds the IQN computations needed for acting and training.
 
