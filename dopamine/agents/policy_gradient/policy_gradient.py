@@ -240,7 +240,7 @@ class PGAgent(object):
         #self.advantage = self._replay.Gt[:,None]
         self.next_state_value = self.baseline_convnet(self._replay.next_states).value * \
                                 (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
-        self.advantage = self.gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
+        self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
         self.loss = -tf.reduce_sum(tf.multiply(tf.log(self._replay_action_p[:,None]),tf.stop_gradient(self.advantage)))
 
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
