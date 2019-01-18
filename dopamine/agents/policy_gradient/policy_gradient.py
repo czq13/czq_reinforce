@@ -249,7 +249,7 @@ class PGAgent(object):
         #self.policy_loss = -tf.reduce_mean(sur1)
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
         self.base_loss = tf.reduce_mean(tf.square(self.advantage))
-        self.loss = self.policy_loss + 0.5*self.base_loss - 0.01 * self.entropy
+        self.loss = self.policy_loss + 0.5*self.base_loss + 0.01 * self.entropy
         self._train_op = self.optimizer.minimize(self.loss)
 
         if self.summary_writer is not None:
