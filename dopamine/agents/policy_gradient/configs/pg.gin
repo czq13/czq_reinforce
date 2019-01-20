@@ -7,7 +7,7 @@ import dopamine.replay_memory.circular_replay_buffer
 import gin.tf.external_configurables
 
 PGAgent.gamma = 0.99
-PGAgent.update_horizon = 50
+PGAgent.update_horizon = 10
 PGAgent.min_replay_history = 1700  # agent steps
 PGAgent.update_period = 4
 PGAgent.target_update_period = 1600  # agent steps
