@@ -89,7 +89,7 @@ def create_agent(sess, environment, summary_writer=None):
         summary_writer=summary_writer)
   elif FLAGS.agent_name == 'policy_gradient':
       return policy_gradient.PGAgent(
-        sess, num_actions=environment.action_space.n,
+        sess, num_actions=1,
         summary_writer=summary_writer)
   else:
     raise ValueError('Unknown agent: {}'.format(FLAGS.agent_name))

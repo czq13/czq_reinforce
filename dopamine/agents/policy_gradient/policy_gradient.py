@@ -31,7 +31,7 @@ import gin.tf
 
 slim = tf.contrib.slim
 
-NATURE_GP_OBSERVATION_SHAPE = (4, 1)  # Size of downscaled Atari 2600 frame.
+NATURE_GP_OBSERVATION_SHAPE = (3, 1)  # Size of downscaled Atari 2600 frame.
 NATURE_GP_DTYPE = tf.float32  # DType of Atari 2600 observations.
 NATURE_GP_STACK_SIZE = 1  # Number of frames in the state stack.
 
@@ -167,21 +167,25 @@ class PGAgent(object):
         return collections.namedtuple('PG_network', ['p_value'])
 
     def _network_template(self,state):
-        cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
+        #cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
+        cons = tf.reshape(tf.constant([1.0,1.0,8.0]), [1, 3, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
         net = slim.fully_connected(bnet,32)
         net = slim.fully_connected(net,32)
         net = slim.flatten(net)
         net = slim.fully_connected(net, self.num_actions, activation_fn=None)
-        p_output = tf.contrib.layers.softmax(net)
-        return self._get_network_type()(p_output)
+        logstd = tf.get_variable(name='logstd', shape=[1, self.num_actions],
+                                 initializer=tf.zeros_initializer())
+        std = tf.zeros_like(net) + tf.exp(logstd)
+        dist = tf.distributions.Normal(loc=net, scale=std)
+        return self._get_network_type()(dist)
 
     def _get_baseline_type(self):
         return collections.namedtuple('baseline',['value'])
 
     def _network_baseline(self,state):
-        cons = tf.reshape(tf.constant([2 * 2.4, 100.0, 12 * 2 * 3.1415 / 360 * 2, 100.0]), [1, 4, 1, 1])
+        cons = tf.reshape(tf.constant([1.0,1.0,8.0]), [1, 3, 1, 1])
         net = tf.cast(state,tf.float32)
         bnet = tf.div(net,cons)
         net = slim.fully_connected(bnet,32)
@@ -219,20 +223,20 @@ class PGAgent(object):
         self.baseline_convnet = tf.make_template('Baseline', self._network_baseline)
         # print('state_ph={}'.format(self.state_ph.shape.as_list()))
         self._net_outputs = self.online_convnet(self.state_ph)
-        self.online_p = self._net_outputs.p_value
+        self.online_dist = self._net_outputs.p_value
+        # shape = (1,1)
+        self.online_action = self.online_dist.sample(1)[0]
+        self.online_pro = self.online_dist.log_prob(self.online_action)
         # TODO(bellemare): Ties should be broken. They are unlikely to happen when
         # using a deep network, but may affect performance with a linear
         # approximation scheme.
         # batch_size * action_nums
 
         #self._replay_net_p_outputs = self.target_convnet(self._replay.states)
-        self._replay_net_p_outputs = self.online_convnet(self._replay.states)
-        self._replay_p_value = self._replay_net_p_outputs.p_value
-        self.entropy = tf.reduce_sum(self._replay_p_value*tf.log(self._replay_p_value),axis = 1)
-        self.entropy = tf.reduce_mean(self.entropy)
-        self._replay_action_p = tf.gather_nd(self._replay_p_value,
-                                             tf.concat([self._replay.indices[:,None],self._replay.actions[:,None]],axis=1))
-        rt1 = tf.div(self._replay_action_p, self._replay.old_pro)
+        self._replay_dist = self.online_convnet(self._replay.states).p_value
+        self.entropy = tf.reduce_mean(self._replay_dist.entropy())
+        self._replay_log = self._replay_dist.log_prob(self._replay.actions[:,None])
+        rt1 = tf.exp(self._replay_log - self._replay.old_pro[:,None])
         rt2 = tf.clip_by_value(rt1, 1.0-0.2, 1.0+0.2)
 
         self.base_line = self.baseline_convnet(self._replay.states).value
@@ -243,13 +247,13 @@ class PGAgent(object):
                                 (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
         self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
         self.stop_advantage = tf.stop_gradient(self.advantage)
-        sur1 = tf.multiply(rt1[:,None], self.stop_advantage)
-        sur2 = tf.multiply(rt2[:,None], self.stop_advantage)
+        sur1 = tf.multiply(rt1, self.stop_advantage)
+        sur2 = tf.multiply(rt2, self.stop_advantage)
         self.policy_loss = -tf.reduce_mean(tf.minimum(sur1, sur2))
         #self.policy_loss = -tf.reduce_mean(sur1)
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
         self.base_loss = tf.reduce_mean(tf.square(self.advantage))
-        self.loss = self.policy_loss + 0.5*self.base_loss + 0.01 * self.entropy
+        self.loss = self.policy_loss + 0.5*self.base_loss - 0.01 * self.entropy
         self._train_op = self.optimizer.minimize(self.loss)
 
         if self.summary_writer is not None:
@@ -360,10 +364,8 @@ class PGAgent(object):
         Returns:
            int, the selected action.
         """
-        p_action = self._sess.run(self.online_p,{self.state_ph: self.state})
-        p_action = p_action[0]
-        a = np.random.choice(np.arange(self.num_actions), p=p_action)
-        return a, p_action[a]
+        a,pro = self._sess.run([self.online_action,self.online_pro],{self.state_ph: self.state})
+        return a, pro
 
     def _train_step(self):
         """Runs a single training step.

@@ -51,7 +51,7 @@ class GymPreprocessing(object):
 
   def __init__(self, frame_skip=1, terminal_on_life_loss=False,
                screen_size=0):
-    self.environment = gym.make('CartPole-v0')
+    self.environment = gym.make('Pendulum-v0')
     self.environment.reset()
 
   @property
@@ -115,7 +115,6 @@ class GymPreprocessing(object):
       info: Gym API's info data structure.
     """
     observation, reward, game_over, info = self.environment.step(action)
-    reward /= 20.0
     self.game_over = game_over
     return observation, reward, game_over, info
 
