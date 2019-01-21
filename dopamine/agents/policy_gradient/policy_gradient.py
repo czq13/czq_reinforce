@@ -246,6 +246,7 @@ class PGAgent(object):
         self.next_state_value = self.baseline_convnet(self._replay.next_states).value * \
                                 (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
         self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
+        self.advantage = (self.advantage-tf.reduce_mean(self.advantage)) / tf.keras.backend.std(self.advantage)
         self.stop_advantage = tf.stop_gradient(self.advantage)
         sur1 = tf.multiply(rt1, self.stop_advantage)
         sur2 = tf.multiply(rt2, self.stop_advantage)
@@ -262,7 +263,7 @@ class PGAgent(object):
                 tf.summary.scalar('loss', self.loss)
                 tf.summary.scalar('action entroy', self.entropy)
                 tf.summary.scalar('policy_loss', self.policy_loss)
-                tf.summary.scalar('advantage', self.advantage)
+                tf.summary.scalar('advantage', tf.reduce_mean(self.advantage))
 
     def _build_replay_buffer(self, use_staging):
         """Creates the replay buffer used by the agent.
