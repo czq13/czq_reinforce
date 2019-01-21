@@ -31,5 +31,5 @@ Runner.training_steps = 400  # agent steps
 Runner.evaluation_steps = 200  # agent steps
 Runner.max_steps_per_episode = 27000  # agent steps
 
-dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.replay_capacity = 1000000
+dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.replay_capacity = 10000
 dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.batch_size = 400

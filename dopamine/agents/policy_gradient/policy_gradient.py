@@ -260,7 +260,9 @@ class PGAgent(object):
             with tf.variable_scope('Losses'):
                 tf.summary.scalar('baseLoss', self.base_loss)
                 tf.summary.scalar('loss', self.loss)
-                tf.summary.scalar('action entroy',self.entropy)
+                tf.summary.scalar('action entroy', self.entropy)
+                tf.summary.scalar('policy_loss', self.policy_loss)
+                tf.summary.scalar('advantage', self.advantage)
 
     def _build_replay_buffer(self, use_staging):
         """Creates the replay buffer used by the agent.
@@ -352,6 +354,7 @@ class PGAgent(object):
         Args:
           reward: float, the last reward from the environment.
         """
+
         if not self.eval_mode:
             self._store_transition(self._observation, self.action, reward, True, self.pro)
 
@@ -365,7 +368,7 @@ class PGAgent(object):
            int, the selected action.
         """
         a,pro = self._sess.run([self.online_action,self.online_pro],{self.state_ph: self.state})
-        return a, pro
+        return a[0], pro[0]
 
     def _train_step(self):
         """Runs a single training step.
@@ -422,6 +425,9 @@ class PGAgent(object):
           reward: float, the reward.
           is_terminal: bool, indicating if the current state is a terminal state.
         """
+        #print(self._replay.memory._store['reward'])
+        if reward == -1.0:
+            pass
         self._replay.add(last_observation, action, reward, is_terminal, old_pro)
 
     def _reset_state(self):
