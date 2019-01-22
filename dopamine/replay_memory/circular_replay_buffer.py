@@ -198,7 +198,6 @@ class OutOfGraphReplayBuffer(object):
         ReplayElement('action', (), np.float32),
         ReplayElement('reward', (), np.float32),
         ReplayElement('terminal', (), np.uint8),
-        ReplayElement('old_pro', (), np.float32)
     ]
 
     for extra_replay_element in self._extra_storage_types:
@@ -234,6 +233,13 @@ class OutOfGraphReplayBuffer(object):
       *args: extra contents with shapes and dtypes according to
         extra_storage_types.
     """
+    self._check_add_types(observation, action, reward, terminal, *args)
+    if self.is_empty() or self._store['terminal'][self.cursor() - 1] == 1:
+      for _ in range(self._stack_size - 1):
+        # Child classes can rely on the padding transitions being filled with
+        # zeros. This is useful when there is a priority argument.
+        self._add_zero_transition()
+
     self._add(observation, action, reward, terminal, *args)
 
   def _add(self, *args):
@@ -460,7 +466,6 @@ class OutOfGraphReplayBuffer(object):
     if batch_size is None:
       batch_size = self._batch_size
 
-    indices = np.arange(0, batch_size, 1)
     transition_elements = self.get_transition_elements(batch_size)
     batch_arrays = self._create_batch_arrays(batch_size)
 
@@ -524,7 +529,6 @@ class OutOfGraphReplayBuffer(object):
                       self._observation_dtype),
         ReplayElement('terminal', (batch_size,), np.uint8),
         ReplayElement('indices', (batch_size,), np.int32),
-        ReplayElement('old_pro', (batch_size,), np.float32)
     ]
     for element in self._extra_storage_types:
       transition_elements.append(
@@ -653,8 +657,9 @@ class WrappedReplayBuffer(object):
                gamma=0.99,
                wrapped_memory=None,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
-               extra_storage_types=None,
-               observation_dtype=np.float32):
+               extra_storage_types=['old_pro', 'value'],
+               observation_dtype=np.float32,
+               fill_value_func = 'fill_Gt'):
     """Initializes WrappedReplayBuffer.
 
     Args:
@@ -702,6 +707,11 @@ class WrappedReplayBuffer(object):
 
     self.create_sampling_ops(use_staging)
 
+    self.buffer = [[]]*7
+    self.fill_value_func = eval('self.'+fill_value_func)
+    self.gamma = gamma
+    self.update_horizon = update_horizon
+
   def add(self, observation, action, reward, terminal, *args):
     """Adds a transition to the replay memory.
 
@@ -719,7 +729,45 @@ class WrappedReplayBuffer(object):
       *args: extra contents with shapes and dtypes according to
         extra_storage_types.
     """
-    self.memory.add(observation, action, reward, terminal, *args)
+    self.buffer[0].append(observation)
+    self.buffer[1].append(action)
+    self.buffer[2].append(reward)
+    self.buffer[3].append(terminal)
+    self.buffer[4].append(args[0]) # old_pro
+    self.buffer[5].append(args[1]) # V(t)
+    self.buffer[6].append(0)
+    if terminal:
+      self.fill_value_func()
+      b = self.buffer
+      for o, a, r, t, old_pro, value in zip(b[0], b[1], b[2], b[3], b[4], b[6]):
+        self.memory.add(o, a, r, t, old_pro, value)
+      for i in self.buffer:
+        i.clear()
+
+  def fill_Gt(self):
+    N = len(self.buffer[0])
+    self.buffer[6][N-1] = self.buffer[2][N-1]
+    for i in range(N-2,-1,-1):
+      self.buffer[6][i] = self.gamma * self.buffer[6][i+1] + self.buffer[2][i]
+
+  def fill_Gt_minus_Vt(self):
+    self.fill_Gt()
+    N = len(self.buffer[0])
+    for i in range(N):
+      self.buffer[6][i] -= self.buffer[5][i]
+
+  def fill_advantage(self):
+    N = len(self.buffer[0])
+    for i in range(N):
+      j = 0
+      for j in range(self.update_horizon):
+        if i + j >= N:
+          break
+        self.buffer[6][i] += self.buffer[2][i+j] * self.gamma**j
+      j += 1
+      if i + j < N:
+        self.buffer[6][i] += self.buffer[5][i+j] * self.gamma**j
+      self.buffer[6][i] -= self.buffer[5][i]
 
   def create_sampling_ops(self, use_staging):
     """Creates the ops necessary to sample from the replay buffer.
@@ -810,6 +858,7 @@ class WrappedReplayBuffer(object):
     self.terminals = self.transition['terminal']
     self.indices = self.transition['indices']
     self.old_pro = self.transition['old_pro']
+    self.value = self.transition['value']
 
   def save(self, checkpoint_dir, iteration_number):
     """Save the underlying replay buffer's contents in a file.
