@@ -49,7 +49,7 @@ def load_gin_configs(gin_files, gin_bindings):
 
 
 def create_atari_environment(game_name, sticky_actions=True):
-  env = GymPreprocessing()
+  env = GymPreprocessing(game_name)
   return env
 
 

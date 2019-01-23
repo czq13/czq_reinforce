@@ -465,7 +465,8 @@ class OutOfGraphReplayBuffer(object):
     """
     if batch_size is None:
       batch_size = self._batch_size
-
+    if indices is None:
+      indices = np.arange(0,batch_size,1)
     transition_elements = self.get_transition_elements(batch_size)
     batch_arrays = self._create_batch_arrays(batch_size)
 
@@ -657,9 +658,9 @@ class WrappedReplayBuffer(object):
                gamma=0.99,
                wrapped_memory=None,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
-               extra_storage_types=['old_pro', 'value'],
+               extra_storage_types=[ReplayElement('old_pro',(),np.float32), ReplayElement('value',(),np.float32),ReplayElement('target',(),np.float32)],
                observation_dtype=np.float32,
-               fill_value_func = 'fill_Gt'):
+               fill_value_func = 'fill_gae'):
     """Initializes WrappedReplayBuffer.
 
     Args:
@@ -707,10 +708,19 @@ class WrappedReplayBuffer(object):
 
     self.create_sampling_ops(use_staging)
 
-    self.buffer = [[]]*7
+    self.buffer = np.zeros([replay_capacity,6],dtype=np.float32)
+    self.obs_buffer = []
+    self.act_buffer = []
+    self.reward_pos = 0
+    self.terminals_pos = 1
+    self.old_pro_pos = 2
+    self.Vt_pos = 3
+    self.value_pos = 4
+    self.target_pos = 5
     self.fill_value_func = eval('self.'+fill_value_func)
     self.gamma = gamma
     self.update_horizon = update_horizon
+    self.cnt = 0
 
   def add(self, observation, action, reward, terminal, *args):
     """Adds a transition to the replay memory.
@@ -729,45 +739,67 @@ class WrappedReplayBuffer(object):
       *args: extra contents with shapes and dtypes according to
         extra_storage_types.
     """
-    self.buffer[0].append(observation)
-    self.buffer[1].append(action)
-    self.buffer[2].append(reward)
-    self.buffer[3].append(terminal)
-    self.buffer[4].append(args[0]) # old_pro
-    self.buffer[5].append(args[1]) # V(t)
-    self.buffer[6].append(0)
+    p = self.cnt
+    self.obs_buffer.append(observation)
+    self.act_buffer.append(action[0])
+    self.buffer[p,self.reward_pos] = reward
+    self.buffer[p,self.terminals_pos] = terminal
+    self.buffer[p,self.old_pro_pos] = args[0] # old_pro
+    self.buffer[p,self.Vt_pos] = args[1] # V(t)
+    self.buffer[p,self.value_pos] = 0 # value
+    self.buffer[p,self.target_pos] = 0 # target
+    self.cnt += 1
     if terminal:
       self.fill_value_func()
       b = self.buffer
-      for o, a, r, t, old_pro, value in zip(b[0], b[1], b[2], b[3], b[4], b[6]):
-        self.memory.add(o, a, r, t, old_pro, value)
-      for i in self.buffer:
-        i.clear()
+      for i in range(self.cnt):
+        self.memory.add(self.obs_buffer[i], self.act_buffer[i], b[i,self.reward_pos], b[i,self.terminals_pos],
+                        b[i,self.old_pro_pos], b[i,self.value_pos], b[i,self.target_pos])
+      self.cnt = 0
 
   def fill_Gt(self):
-    N = len(self.buffer[0])
-    self.buffer[6][N-1] = self.buffer[2][N-1]
+    N = self.cnt
+    self.buffer[N-1,self.value_pos] = self.buffer[N-1,self.reward_pos]
     for i in range(N-2,-1,-1):
-      self.buffer[6][i] = self.gamma * self.buffer[6][i+1] + self.buffer[2][i]
+      self.buffer[i,self.value_pos] = self.gamma * self.buffer[i+1,self.value_pos] + self.buffer[i,self.reward_pos]
 
   def fill_Gt_minus_Vt(self):
     self.fill_Gt()
-    N = len(self.buffer[0])
+    N = self.cnt
     for i in range(N):
-      self.buffer[6][i] -= self.buffer[5][i]
+      self.buffer[i,self.value_pos] -= self.buffer[i,self.Vt_pos]
 
-  def fill_advantage(self):
-    N = len(self.buffer[0])
+  def fill_target(self):
+    N = self.cnt
     for i in range(N):
       j = 0
       for j in range(self.update_horizon):
         if i + j >= N:
           break
-        self.buffer[6][i] += self.buffer[2][i+j] * self.gamma**j
-      j += 1
+        self.buffer[i, self.target_pos] += self.buffer[i+j, self.reward_pos] * self.gamma ** j
+        j += 1
       if i + j < N:
-        self.buffer[6][i] += self.buffer[5][i+j] * self.gamma**j
-      self.buffer[6][i] -= self.buffer[5][i]
+        self.buffer[i, self.target_pos] += self.buffer[i+j, self.Vt_pos] * self.gamma ** j
+
+  def fill_advantage(self):
+    N = self.cnt
+    self.fill_target()
+    for i in range(N):
+      self.buffer[i, self.value_pos] = self.buffer[i, self.target_pos] - self.buffer[i, self.Vt_pos]
+
+  def fill_gae(self):
+    N = self.cnt
+    delta = np.zeros([N,])
+    self.fill_target()
+    for i in range(N):
+      if i < N-1:
+        delta[i] = (self.buffer[i+1, self.Vt_pos]*self.gamma + self.buffer[i, self.reward_pos] - self.buffer[i, self.Vt_pos])
+      else:
+        delta[i] = self.buffer[i, self.reward_pos] - self.buffer[i, self.Vt_pos]
+    g = self.gamma * 0.95
+    self.buffer[N-1, self.value_pos] = delta[N-1]
+    for i in range(N-2, -1, -1):
+      self.buffer[i, self.value_pos] = delta[i] + self.buffer[i+1, self.value_pos] * g
 
   def create_sampling_ops(self, use_staging):
     """Creates the ops necessary to sample from the replay buffer.
@@ -859,6 +891,7 @@ class WrappedReplayBuffer(object):
     self.indices = self.transition['indices']
     self.old_pro = self.transition['old_pro']
     self.value = self.transition['value']
+    self.target = self.transition['target']
 
   def save(self, checkpoint_dir, iteration_number):
     """Save the underlying replay buffer's contents in a file.

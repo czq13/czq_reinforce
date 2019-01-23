@@ -227,6 +227,7 @@ class PGAgent(object):
         # shape = (1,1)
         self.online_action = self.online_dist.sample(1)[0]
         self.online_pro = self.online_dist.log_prob(self.online_action)
+        self.online_value = self.baseline_convnet(self.state_ph)
         # TODO(bellemare): Ties should be broken. They are unlikely to happen when
         # using a deep network, but may affect performance with a linear
         # approximation scheme.
@@ -240,20 +241,13 @@ class PGAgent(object):
         rt2 = tf.clip_by_value(rt1, 1.0-0.2, 1.0+0.2)
 
         self.base_line = self.baseline_convnet(self._replay.states).value
-        self.main_loss_base_line = tf.stop_gradient(self.base_line)
-        #self.advantage = tf.subtract(self._replay.Gt[:,None],self.main_loss_base_line)
-        #self.advantage = self._replay.Gt[:,None]
-        self.next_state_value = self.baseline_convnet(self._replay.next_states).value * \
-                                (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
-        self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
-        self.advantage = (self.advantage-tf.reduce_mean(self.advantage)) / tf.keras.backend.std(self.advantage)
-        self.stop_advantage = tf.stop_gradient(self.advantage)
-        sur1 = tf.multiply(rt1, self.stop_advantage)
-        sur2 = tf.multiply(rt2, self.stop_advantage)
+
+        sur1 = tf.multiply(rt1, self._replay.value[:,None])
+        sur2 = tf.multiply(rt2, self._replay.value[:,None])
         self.policy_loss = -tf.reduce_mean(tf.minimum(sur1, sur2))
         #self.policy_loss = -tf.reduce_mean(sur1)
         #self.base_loss = tf.reduce_mean(tf.square(self._replay.Gt[:,None]-self.base_line))
-        self.base_loss = tf.reduce_mean(tf.square(self.advantage))
+        self.base_loss = tf.reduce_mean(tf.square(self.base_line - self._replay.target[:,None]))
         self.loss = self.policy_loss + 0.5*self.base_loss - 0.01 * self.entropy
         self._train_op = self.optimizer.minimize(self.loss)
 
@@ -263,7 +257,6 @@ class PGAgent(object):
                 tf.summary.scalar('loss', self.loss)
                 tf.summary.scalar('action entroy', self.entropy)
                 tf.summary.scalar('policy_loss', self.policy_loss)
-                tf.summary.scalar('advantage', tf.reduce_mean(self.advantage))
 
     def _build_replay_buffer(self, use_staging):
         """Creates the replay buffer used by the agent.
@@ -319,7 +312,7 @@ class PGAgent(object):
         if not self.eval_mode:
             self._train_step()
 
-        self.action,self.pro = self._select_action()
+        self.action,self.pro,self.value = self._select_action()
         return self.action
 
     def step(self, reward, observation):
@@ -340,10 +333,10 @@ class PGAgent(object):
         self._record_observation(observation)
 
         if not self.eval_mode:
-            self._store_transition(self._last_observation, self.action, reward, False, self.pro)
+            self._store_transition(self._last_observation, self.action, reward, False, self.pro, self.value)
             self._train_step()
 
-        self.action, self.pro = self._select_action()
+        self.action, self.pro, self.value = self._select_action()
         return self.action
 
     def end_episode(self, reward):
@@ -357,7 +350,7 @@ class PGAgent(object):
         """
 
         if not self.eval_mode:
-            self._store_transition(self._observation, self.action, reward, True, self.pro)
+            self._store_transition(self._observation, self.action, reward, True, self.pro, self.value)
 
     def _select_action(self):
         """Select an action from the set of available actions.
@@ -368,8 +361,8 @@ class PGAgent(object):
         Returns:
            int, the selected action.
         """
-        a,pro = self._sess.run([self.online_action,self.online_pro],{self.state_ph: self.state})
-        return a[0], pro[0]
+        a,pro,value = self._sess.run([self.online_action,self.online_pro,self.online_value],{self.state_ph: self.state})
+        return a[0], pro[0],value[0]
 
     def _train_step(self):
         """Runs a single training step.
@@ -410,7 +403,7 @@ class PGAgent(object):
         self.state = np.roll(self.state, -1, axis=-1)
         self.state[0, ..., -1] = self._observation
 
-    def _store_transition(self, last_observation, action, reward, is_terminal, old_pro):
+    def _store_transition(self, last_observation, action, reward, is_terminal, old_pro, value):
         """Stores an experienced transition.
 
         Executes a tf session and executes replay buffer ops in order to store the
@@ -427,9 +420,7 @@ class PGAgent(object):
           is_terminal: bool, indicating if the current state is a terminal state.
         """
         #print(self._replay.memory._store['reward'])
-        if reward == -1.0:
-            pass
-        self._replay.add(last_observation, action, reward, is_terminal, old_pro)
+        self._replay.add(last_observation, action, reward, is_terminal, old_pro, value)
 
     def _reset_state(self):
         """Resets the agent state by filling it with zeros."""
