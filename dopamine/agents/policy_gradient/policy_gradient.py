@@ -226,6 +226,7 @@ class PGAgent(object):
         self.online_dist = self._net_outputs.p_value
         # shape = (1,1)
         self.online_action = self.online_dist.sample(1)[0]
+        self.online_eval_action = self.online_dist.mean()
         self.online_pro = self.online_dist.log_prob(self.online_action)
         self.online_value = self.baseline_convnet(self.state_ph)
         # TODO(bellemare): Ties should be broken. They are unlikely to happen when
@@ -361,7 +362,12 @@ class PGAgent(object):
         Returns:
            int, the selected action.
         """
-        a,pro,value = self._sess.run([self.online_action,self.online_pro,self.online_value],{self.state_ph: self.state})
+        if not self.eval_mode:
+            a,pro,value = self._sess.run([self.online_action,self.online_pro,self.online_value],{self.state_ph: self.state})
+        else:
+            ta = self._sess.run([self.online_eval_action],{self.state_ph:self.state})
+            a = [[ta[0][0,0]]]
+            pro,value = [1],[2]
         return a[0], pro[0],value[0]
 
     def _train_step(self):
