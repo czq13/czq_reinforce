@@ -34,9 +34,9 @@ import gin.tf
 slim = tf.contrib.slim
 
 
-NATURE_DQN_OBSERVATION_SHAPE = (84, 84)  # Size of downscaled Atari 2600 frame.
-NATURE_DQN_DTYPE = tf.uint8  # DType of Atari 2600 observations.
-NATURE_DQN_STACK_SIZE = 4  # Number of frames in the state stack.
+NATURE_DQN_OBSERVATION_SHAPE = (3, )  # Size of downscaled Atari 2600 frame.
+NATURE_DQN_DTYPE = tf.float32  # DType of Atari 2600 observations.
+NATURE_DQN_STACK_SIZE = 1  # Number of frames in the state stack.
 
 
 def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
@@ -173,8 +173,7 @@ class DQNAgent(object):
 
       self._build_networks()
 
-      self._train_op = self._build_train_op()
-      self._sync_qt_ops = self._build_sync_op()
+      self._sync_actor_ops, self._sync_critic_ops = self._build_sync_op()
 
     if self.summary_writer is not None:
       # All tf.summaries should have been defined prior to running this.
@@ -187,13 +186,17 @@ class DQNAgent(object):
     self._observation = None
     self._last_observation = None
 
-  def _get_network_type(self):
+  def _get_network_Action_type(self):
     """Returns the type of the outputs of a Q value network.
 
     Returns:
       net_type: _network_type object defining the outputs of the network.
     """
-    return collections.namedtuple('DQN_network', ['q_values'])
+    return collections.namedtuple('Action_network', ['action'])
+
+  def _get_network_Critic_type(self):
+
+    return collections.namedtuple('Critic_network',['q_value'])
 
   def _network_template_for_atari(self, state):
     """Builds the convolutional network used to compute the agent's Q-values.
@@ -213,14 +216,18 @@ class DQNAgent(object):
     net = slim.fully_connected(net, 512)
     q_values = slim.fully_connected(net, self.num_actions, activation_fn=None)
     return self._get_network_type()(q_values)
-  def _network_template(self,state):
-    cons = tf.constant([2*2.4,100.0,12*2*3.1415/360*2,100.0])
-    net = tf.cast(state,tf.float32)
-    net = tf.div(net,cons)
-    net = slim.fully_connected(net,32)
-    net = slim.fully_connected(net,32)
-    q_values = slim.fully_connected(net,self.num_actions,activation_fn=None)
-    return self._get_network_type()(q_values)
+
+  def _network_template_action(self, state):
+    net = slim.fully_connected(state, 32)
+    net = slim.fully_connected(net, 32)
+    action = slim.fully_connected(net, self.num_actions, activation_fn=tf.tanh)
+    return self._get_network_Action_type()(action)
+
+  def _network_template_critic(self, state):
+    net = slim.fully_connected(state, 32)
+    net = slim.fully_connected(net, 32)
+    q_value = slim.fully_connected(net, 1, activation_fn=None)
+    return self._get_network_Critic_type()(q_value)
 
   def _build_networks(self):
     """Builds the Q-value network computations needed for acting and training.
@@ -237,20 +244,66 @@ class DQNAgent(object):
     # Calling online_convnet will generate a new graph as defined in
     # self._get_network_template using whatever input is passed, but will always
     # share the same weights.
-    self.online_convnet = tf.make_template('Online', self._network_template)
-    self.target_convnet = tf.make_template('Target', self._network_template)
-    self._net_outputs = self.online_convnet(self.state_ph)
-    # TODO(bellemare): Ties should be broken. They are unlikely to happen when
-    # using a deep network, but may affect performance with a linear
-    # approximation scheme.
-    self._q_argmax = tf.argmax(self._net_outputs.q_values, axis=1)[0]
+    self.online_Actor = tf.make_template('Online_Actor', self._network_template_action)
+    self.online_Critic = tf.make_template('Online_Critic', self._network_template_critic)
+    self.target_Actor = tf.make_template('Target_Actor', self._network_template_action)
+    self.target_Critic = tf.make_template('Target_Critic', self._network_template_critic)
+    self.build_trainable_param()
+    #online action
+    self.online_Action = self.online_Actor(self.state_ph).action
+    #online critic training
+    self.batch_state_action = tf.concat([self._replay.states,self._replay.actions[:,None]],1)
+    self.batch_online_q_value = self.online_Critic(self.batch_state_action).q_value
+    self.batch_next_action = self.target_Actor(self._replay.next_states).action
+    self.batch_next_state_action = tf.concat([self._replay.next_states,self.batch_next_action],1)
+    self.batch_next_q_value = self.target_Actor(self.batch_next_state_action).q_value
+    self.batch_y_q_value = self.cumulative_gamma * self.batch_next_q_value * (
+        1. - tf.cast(self._replay.terminals, tf.float32)) + self._replay.rewards[:,None]
+    online_critic_loss = tf.losses.huber_loss(
+      self.batch_y_q_value, self.batch_online_q_value, reduction=tf.losses.Reduction.NONE)
+    online_critic_optimizer = tf.train.RMSPropOptimizer(
+        learning_rate=0.00025,
+        decay=0.95,
+        momentum=0.0,
+        epsilon=0.00001,
+        centered=True)
+    self.online_critic_update = online_critic_optimizer.minimize(online_critic_loss)
+    #online actor training
+    self.batch_online_action = self.online_Action(self._replay.states)
+    self.batch_online_state_action = tf.concat([self._replay.states,self.batch_online_action],1)
+    self.batch_online_q_value2 = self.online_Critic(self.batch_online_state_action).q_value
+    gradients = tf.gradients(self.batch_online_q_value2,self.batch_online_state_action)
+    self.batch_size = tf.shape(self._replay.rewards)[0]
+    first_indices = tf.range(self.batch_size)
+    second_indices = tf.zeros([self.batch_size,1], dtype=tf.int32) -1
+    self.indices = tf.concat([first_indices,second_indices],1)
+    self.action_gradients = tf.gather_nd(gradients,self.indices)
+    self.online_actor_gradients = tf.gradients(self.batch_online_action,self._replay.states,-gradients)
+    self.online_actor_update = tf.train.AdamOptimizer(1e-4).apply_gradients(zip(self.online_actor_gradients,self.online_actor_param))
 
-    self._replay_net_outputs = self.online_convnet(self._replay.states)
-    self._replay_next_target_net_outputs = self.target_convnet(
-        self._replay.next_states)
+  def build_trainable_param(self):
+    self.online_actor_param = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope='Online_Actor')
+    self.online_critic_param = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope='Online_Critic')
+    self.target_actor_param = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope='Target_Actor')
+    self.target_critic_param = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope='Target_Critic')
+    self.actor_ema = tf.train.ExponentialMovingAverage(decay = 1-0.001)
+    self.critic_ema = tf.train.ExponentialMovingAverage(decay = 1-0.001)
+    #those two operator should be called independent
+    self.actor_param_update = self.actor_ema.apply(self.online_actor_param)
+    self.critic_param_update = self.critic_ema.apply(self.online_critic_param)
+
+    self.actor_target_param = [self.actor_ema.average(x) for x in self.online_actor_param]
+    self.critic_target_param = [self.critic_ema.average(x) for x in self.online_critic_param]
+
+  def build_train_op(self):
+    pass
 
   def _build_replay_buffer(self, use_staging):
-    """Creates the replay buffer used by the agent.
+    """Creates the reply buffer used by the agent.
 
     Args:
       use_staging: bool, if True, uses a staging area to prefetch data for
@@ -267,46 +320,6 @@ class DQNAgent(object):
         gamma=self.gamma,
         observation_dtype=self.observation_dtype.as_numpy_dtype)
 
-  def _build_target_q_op(self):
-    """Build an op used as a target for the Q-value.
-
-    Returns:
-      target_q_op: An op calculating the Q-value.
-    """
-    # Get the maximum Q-value across the actions dimension.
-    replay_next_qt_max = tf.reduce_max(
-        self._replay_next_target_net_outputs.q_values, 1)
-    # Calculate the Bellman target value.
-    #   Q_t = R_t + \gamma^N * Q'_t+1
-    # where,
-    #   Q'_t+1 = \argmax_a Q(S_t+1, a)
-    #          (or) 0 if S_t is a terminal state,
-    # and
-    #   N is the update horizon (by default, N=1).
-    return self._replay.rewards + self.cumulative_gamma * replay_next_qt_max * (
-        1. - tf.cast(self._replay.terminals, tf.float32))
-
-  def _build_train_op(self):
-    """Builds a training op.
-
-    Returns:
-      train_op: An op performing one step of training from replay data.
-    """
-    replay_action_one_hot = tf.one_hot(
-        self._replay.actions, self.num_actions, 1., 0., name='action_one_hot')
-    replay_chosen_q = tf.reduce_sum(
-        self._replay_net_outputs.q_values * replay_action_one_hot,
-        reduction_indices=1,
-        name='replay_chosen_q')
-
-    target = tf.stop_gradient(self._build_target_q_op())
-    loss = tf.losses.huber_loss(
-        target, replay_chosen_q, reduction=tf.losses.Reduction.NONE)
-    if self.summary_writer is not None:
-      with tf.variable_scope('Losses'):
-        tf.summary.scalar('HuberLoss', tf.reduce_mean(loss))
-    return self.optimizer.minimize(tf.reduce_mean(loss))
-
   def _build_sync_op(self):
     """Builds ops for assigning weights from online to target network.
 
@@ -314,15 +327,12 @@ class DQNAgent(object):
       ops: A list of ops assigning weights from online to target network.
     """
     # Get trainable variables from online and target DQNs
-    sync_qt_ops = []
-    trainables_online = tf.get_collection(
-        tf.GraphKeys.TRAINABLE_VARIABLES, scope='Online')
-    trainables_target = tf.get_collection(
-        tf.GraphKeys.TRAINABLE_VARIABLES, scope='Target')
-    for (w_online, w_target) in zip(trainables_online, trainables_target):
-      # Assign weights from online to target network.
-      sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
-    return sync_qt_ops
+    sync_actor_ops,sync_critic_ops = [],[]
+    for (origin,target) in zip(self.target_actor_param,self.actor_target_param):
+      sync_actor_ops.append(origin.assign(target,use_locing=True))
+    for (origin,target) in zip(self.target_critic_param,self.critic_target_param):
+      sync_critic_ops.append(origin.assign(target,use_locing=True))
+    return sync_actor_ops,sync_critic_ops
 
   def begin_episode(self, observation):
     """Returns the agent's first action for this episode.
@@ -386,17 +396,11 @@ class DQNAgent(object):
     Returns:
        int, the selected action.
     """
-    epsilon = self.epsilon_eval if self.eval_mode else self.epsilon_fn(
-        self.epsilon_decay_period,
-        self.training_steps,
-        self.min_replay_history,
-        self.epsilon_train)
-    if random.random() <= epsilon:
-      # Choose a random action with probability epsilon.
-      return random.randint(0, self.num_actions - 1)
-    else:
-      # Choose the action with highest Q-value at the current state.
-      return self._sess.run(self._q_argmax, {self.state_ph: self.state})
+    a = self._sess.run([self.online_Action], {self.state_ph : self.state})
+    if self.eval_mode:
+      rd = np.random.normal(0,0.5,[self.num_actions,])
+      a += rd
+    return a
 
   def _train_step(self):
     """Runs a single training step.
@@ -412,15 +416,15 @@ class DQNAgent(object):
     # have been run. This matches the Nature DQN behaviour.
     if self._replay.memory.add_count > self.min_replay_history:
       if self.training_steps % self.update_period == 0:
-        self._sess.run(self._train_op)
+        self._sess.run([self.online_critic_update,self.online_actor_update])
         if (self.summary_writer is not None and
             self.training_steps > 0 and
             self.training_steps % self.summary_writing_frequency == 0):
           summary = self._sess.run(self._merged_summaries)
           self.summary_writer.add_summary(summary, self.training_steps)
 
-      if self.training_steps % self.target_update_period == 0:
-        self._sess.run(self._sync_qt_ops)
+      #if self.training_steps % self.target_update_period == 0:
+        self._sess.run(self._sync_actor_ops+ self._sync_critic_ops)
 
     self.training_steps += 1
 

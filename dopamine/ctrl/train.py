@@ -27,6 +27,7 @@ from dopamine.agents.dqn import dqn_agent
 from dopamine.agents.implicit_quantile import implicit_quantile_agent
 from dopamine.agents.rainbow import rainbow_agent
 from dopamine.ctrl import run_experiment
+from gym import spaces
 
 import tensorflow as tf
 
@@ -75,8 +76,12 @@ def create_agent(sess, environment, summary_writer=None):
   """
   if not FLAGS.debug_mode:
     summary_writer = None
+  if isinstance(environment.action_space,spaces.Box):
+      nums_action = environment.action_space.shape[0]
+  else:
+      nums_action = environment.action_space.n
   if FLAGS.agent_name == 'dqn':
-    return dqn_agent.DQNAgent(sess, num_actions=environment.action_space.n,
+    return dqn_agent.DQNAgent(sess, num_actions=nums_action,
                               summary_writer=summary_writer)
   elif FLAGS.agent_name == 'rainbow':
     return rainbow_agent.RainbowAgent(

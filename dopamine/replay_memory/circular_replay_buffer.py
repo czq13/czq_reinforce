@@ -103,7 +103,7 @@ class OutOfGraphReplayBuffer(object):
                gamma=0.99,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
                extra_storage_types=None,
-               observation_dtype=np.uint8):
+               observation_dtype=np.float32):
     """Initializes OutOfGraphReplayBuffer.
 
     Args:
@@ -193,7 +193,7 @@ class OutOfGraphReplayBuffer(object):
     storage_elements = [
         ReplayElement('observation', self._observation_shape,
                       self._observation_dtype),
-        ReplayElement('action', (), np.int32),
+        ReplayElement('action', (), np.float32),
         ReplayElement('reward', (), np.float32),
         ReplayElement('terminal', (), np.uint8)
     ]
@@ -522,7 +522,7 @@ class OutOfGraphReplayBuffer(object):
     transition_elements = [
         ReplayElement('state', (batch_size,) + self._state_shape,
                       self._observation_dtype),
-        ReplayElement('action', (batch_size,), np.int32),
+        ReplayElement('action', (batch_size,), np.float32),
         ReplayElement('reward', (batch_size,), np.float32),
         ReplayElement('next_state', (batch_size,) + self._state_shape,
                       self._observation_dtype),
@@ -657,7 +657,7 @@ class WrappedReplayBuffer(object):
                wrapped_memory=None,
                max_sample_attempts=MAX_SAMPLE_ATTEMPTS,
                extra_storage_types=None,
-               observation_dtype=np.uint8):
+               observation_dtype=np.float32):
     """Initializes WrappedReplayBuffer.
 
     Args:

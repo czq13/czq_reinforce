@@ -51,7 +51,7 @@ class GymPreprocessing(object):
 
   def __init__(self, environment, frame_skip=1, terminal_on_life_loss=False,
                screen_size=0):
-    self.env = gym.make('CartPole-v0')
+    self.env = gym.make('Pendulum-v0')
     self.env.reset()
 
   @property
@@ -128,7 +128,7 @@ class GymPreprocessing(object):
     for time_step in range(self.frame_skip):
       # We bypass the Gym observation altogether and directly fetch the
       # grayscale image from the ALE. This is a little faster.
-      _, reward, game_over, info = self.environment.step(action)
+      _, reward, game_over, info = self.environment.step(action*2)
       accumulated_reward += reward
 
       if self.terminal_on_life_loss:
