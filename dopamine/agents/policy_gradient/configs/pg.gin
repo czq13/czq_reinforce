@@ -8,9 +8,9 @@ import gin.tf.external_configurables
 
 PGAgent.gamma = 0.99
 PGAgent.update_horizon = 10
-PGAgent.min_replay_history = 450  # agent steps
+PGAgent.min_replay_history = 3250  # agent steps
 PGAgent.update_period = 4
-PGAgent.target_update_period = 400  # agent steps
+PGAgent.target_update_period = 3200  # agent steps
 PGAgent.epsilon_train = 0.01
 PGAgent.epsilon_eval = 0.001
 PGAgent.epsilon_decay_period = 250000  # agent steps
@@ -27,9 +27,9 @@ Runner.game_name = 'Pong'
 # Sticky actions with probability 0.25, as suggested by (Machado et al., 2017).
 Runner.sticky_actions = True
 Runner.num_iterations = 50000
-Runner.training_steps = 400  # agent steps
+Runner.training_steps = 3200  # agent steps
 Runner.evaluation_steps = 200  # agent steps
 Runner.max_steps_per_episode = 27000  # agent steps
 
 dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.replay_capacity = 10000
-dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.batch_size = 400
+dopamine.replay_memory.circular_replay_buffer.WrappedReplayBuffer.batch_size = 3200

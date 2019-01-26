@@ -174,7 +174,7 @@ class PGAgent(object):
         net = slim.fully_connected(bnet,32)
         net = slim.fully_connected(net,32)
         net = slim.flatten(net)
-        net = slim.fully_connected(net, self.num_actions, activation_fn=None)
+        net = slim.fully_connected(net, self.num_actions, activation_fn=tf.tanh)
         logstd = tf.get_variable(name='logstd', shape=[1, self.num_actions],
                                  initializer=tf.zeros_initializer())
         std = tf.zeros_like(net) + tf.exp(logstd)
@@ -225,6 +225,7 @@ class PGAgent(object):
         self._net_outputs = self.online_convnet(self.state_ph)
         self.online_dist = self._net_outputs.p_value
         # shape = (1,1)
+        self.online_mean = self.online_dist.mean()
         self.online_action = self.online_dist.sample(1)[0]
         self.online_pro = self.online_dist.log_prob(self.online_action)
         # TODO(bellemare): Ties should be broken. They are unlikely to happen when
@@ -246,7 +247,7 @@ class PGAgent(object):
         self.next_state_value = self.baseline_convnet(self._replay.next_states).value * \
                                 (1.0 - tf.cast(self._replay.terminals[:,None], dtype=tf.float32))
         self.advantage = self.cumulative_gamma * tf.stop_gradient(self.next_state_value) + self._replay.rewards[:,None] - self.base_line
-        self.advantage = (self.advantage-tf.reduce_mean(self.advantage)) / tf.keras.backend.std(self.advantage)
+        #self.advantage1 = (self.advantage-tf.reduce_mean(self.advantage)) / tf.keras.backend.std(self.advantage)
         self.stop_advantage = tf.stop_gradient(self.advantage)
         sur1 = tf.multiply(rt1, self.stop_advantage)
         sur2 = tf.multiply(rt2, self.stop_advantage)
@@ -368,7 +369,12 @@ class PGAgent(object):
         Returns:
            int, the selected action.
         """
-        a,pro = self._sess.run([self.online_action,self.online_pro],{self.state_ph: self.state})
+        if not self.eval_mode:
+            a,pro = self._sess.run([self.online_action,self.online_pro],{self.state_ph: self.state})
+        else:
+            ta = self._sess.run([self.online_mean],{self.state_ph: self.state})
+            a = [[ta[0][0, 0]]]
+            pro = [1]
         return a[0], pro[0]
 
     def _train_step(self):
