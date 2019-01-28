@@ -71,8 +71,10 @@ def create_atari_environment(game_name, sticky_actions=True):
   Returns:
     An Atari 2600 environment with some standard preprocessing.
   """
-  env = GymPreprocessing()
-  
+  game_version = 'v0' if sticky_actions else 'v4'
+  full_game_name = 'Pendulum-v0'
+  env = GymPreprocessing(full_game_name)
+
   return env
 
 

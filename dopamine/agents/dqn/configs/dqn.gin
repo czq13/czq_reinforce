@@ -26,7 +26,7 @@ tf.train.RMSPropOptimizer.centered = True
 Runner.game_name = 'Pong'
 # Sticky actions with probability 0.25, as suggested by (Machado et al., 2017).
 Runner.sticky_actions = True
-Runner.num_iterations = 200
+Runner.num_iterations = 20000
 Runner.training_steps = 2500  # agent steps
 Runner.evaluation_steps = 1250  # agent steps
 Runner.max_steps_per_episode = 27000  # agent steps

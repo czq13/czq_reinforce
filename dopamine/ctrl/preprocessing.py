@@ -49,7 +49,7 @@ class GymPreprocessing(object):
   在由于不处理图像问题，所以暂时frame_skip设置为1，screen_size设置为0，目的是拿掉所有sreen_size可能影响的人
   """
 
-  def __init__(self, frame_skip=1, terminal_on_life_loss=False,
+  def __init__(self, full_name,frame_skip=1, terminal_on_life_loss=False,
                screen_size=0):
     self.environment = gym.make('Pendulum-v0')
     self.environment.reset()
@@ -115,6 +115,7 @@ class GymPreprocessing(object):
       info: Gym API's info data structure.
     """
     observation, reward, game_over, info = self.environment.step(action*2)
+    observation /= np.array([1.0,1.0,8.0])
     self.game_over = game_over
     return observation, reward, game_over, info
 

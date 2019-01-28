@@ -201,7 +201,7 @@ class PGAgent(object):
         net = slim.fully_connected(bnet,32)
         net = slim.fully_connected(net,32)
         net = slim.flatten(net)
-        net = slim.fully_connected(net, self.num_actions, activation_fn=None)
+        net = slim.fully_connected(net, self.num_actions, activation_fn=tf.tanh)
         return self._get_baseline_type()(net)
 
     def _build_networks(self):

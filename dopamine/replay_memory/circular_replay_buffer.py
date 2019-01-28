@@ -459,8 +459,9 @@ class OutOfGraphReplayBuffer(object):
     """
     if batch_size is None:
       batch_size = self._batch_size
-
-    indices = np.arange(0, batch_size, 1)
+    if indices is None:
+      indices = self.sample_index_batch(batch_size)
+    assert len(indices) == batch_size
     transition_elements = self.get_transition_elements(batch_size)
     batch_arrays = self._create_batch_arrays(batch_size)
 
@@ -501,7 +502,6 @@ class OutOfGraphReplayBuffer(object):
           element_array[batch_element] = (
               self._store[element.name][state_index])
         # We assume the other elements are filled in by the subclass.
-    self.add_count = 0
     return batch_arrays
 
   def get_transition_elements(self, batch_size=None):
